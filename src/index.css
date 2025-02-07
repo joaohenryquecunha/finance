@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --gold-primary: #FFD700;
+  --gold-secondary: #DAA520;
+  --gold-hover: #F4C430;
+  --dark-primary: #121212;
+  --dark-secondary: #1E1E1E;
+  --dark-tertiary: #2D2D2D;
+}
+
+body {
+  @apply bg-[#121212] text-gray-100;
+}
+
+/* Glow effect for values */
+.glow-text {
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  transition: text-shadow 0.3s ease;
+}
+
+.glow-text:hover {
+  text-shadow: 0 0 15px rgba(255, 215, 0, 0.7);
+}
+
+/* Customize scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-[#2D2D2D];
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-[#4D4D4D] rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-[#666666];
+}
+
+/* Custom animations */
+@keyframes pulse-gold {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes slide-up {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.5s ease-out forwards;
+}
