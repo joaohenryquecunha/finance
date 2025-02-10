@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { Transaction, Category } from '../types';
+import { useNavigate } from 'react-router-dom';
 
 interface User {
   uid: string;
@@ -33,7 +34,7 @@ interface AuthContextType {
   user: User | null;
   signIn: (username: string, password: string, isAdminLogin?: boolean) => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
   getUserData: () => { transactions: Transaction[]; categories: Category[]; } | null;
   updateUserData: (data: { transactions?: Transaction[]; categories?: Category[]; }) => Promise<void>;
 }
@@ -46,30 +47,65 @@ const ADMIN_CREDENTIALS = {
   password: 'januzzi@!'
 };
 
+// Storage keys
+const USER_STORAGE_KEY = 'jf_user';
+const USER_DATA_STORAGE_KEY = 'jf_user_data';
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [userData, setUserData] = useState<UserData | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    const storedUser = localStorage.getItem(USER_STORAGE_KEY);
+    return storedUser ? JSON.parse(storedUser) : null;
+  });
+  const [userData, setUserData] = useState<UserData | null>(() => {
+    const storedData = localStorage.getItem(USER_DATA_STORAGE_KEY);
+    return storedData ? JSON.parse(storedData) : null;
+  });
+  const navigate = useNavigate();
+
+  // Effect to persist user state
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(USER_STORAGE_KEY);
+    }
+  }, [user]);
+
+  // Effect to persist user data
+  useEffect(() => {
+    if (userData) {
+      localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(userData));
+    } else {
+      localStorage.removeItem(USER_DATA_STORAGE_KEY);
+    }
+  }, [userData]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
+      if (firebaseUser && !user?.isAdmin) { // Skip for admin user
         try {
+          // Skip fetching if we already have the user data
+          if (user?.uid === firebaseUser.uid) {
+            return;
+          }
+
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data();
-            setUser({
+            const newUser = {
               uid: firebaseUser.uid,
               username: userData.username,
               isAdmin: userData.isAdmin || false,
               isApproved: userData.isApproved || false
-            });
+            };
+            setUser(newUser);
 
-            // Inicializa os dados do usuário se necessário
+            // Fetch user data if not already loaded
             const userDataDoc = await getDoc(doc(db, 'userData', firebaseUser.uid));
             if (userDataDoc.exists()) {
-              setUserData(userDataDoc.data() as UserData);
+              const newUserData = userDataDoc.data() as UserData;
+              setUserData(newUserData);
             } else {
-              // Cria documento de dados do usuário se não existir
               const initialUserData = { transactions: [], categories: [] };
               await setDoc(doc(db, 'userData', firebaseUser.uid), initialUserData);
               setUserData(initialUserData);
@@ -86,26 +122,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(null);
           setUserData(null);
         }
-      } else {
-        setUser(null);
-        setUserData(null);
       }
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const signIn = async (username: string, password: string, isAdminLogin?: boolean) => {
     try {
       // Admin login
       if (isAdminLogin) {
         if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-          setUser({
+          const adminUser = {
             uid: 'admin',
             username: ADMIN_CREDENTIALS.username,
             isAdmin: true,
             isApproved: true
-          });
+          };
+          setUser(adminUser);
+          setUserData({ transactions: [], categories: [] });
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(adminUser));
+          localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify({ transactions: [], categories: [] }));
           return;
         }
         throw new Error('Credenciais de administrador inválidas');
@@ -115,7 +152,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const email = `${username}@user.com`;
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       
-      // Verifica se o documento do usuário existe
       const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
       
       if (!userDoc.exists()) {
@@ -123,21 +159,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('Usuário não encontrado');
       }
 
-      const userData = userDoc.data();
+      const userDocData = userDoc.data();
 
-      // Verifica se o usuário está aprovado
-      if (!userData.isApproved) {
+      if (!userDocData.isApproved) {
         await firebaseSignOut(auth);
         throw new Error('Sua conta está aguardando aprovação do administrador');
       }
 
-      // Atualiza o estado do usuário
-      setUser({
+      const newUser = {
         uid: userCredential.user.uid,
-        username: userData.username,
-        isAdmin: userData.isAdmin || false,
-        isApproved: userData.isApproved
-      });
+        username: userDocData.username,
+        isAdmin: userDocData.isAdmin || false,
+        isApproved: userDocData.isApproved
+      };
+      setUser(newUser);
+
+      // Load user data
+      const userDataDoc = await getDoc(doc(db, 'userData', userCredential.user.uid));
+      if (userDataDoc.exists()) {
+        setUserData(userDataDoc.data() as UserData);
+      }
 
     } catch (error: any) {
       console.error('Error in signIn:', error);
@@ -153,7 +194,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signUp = async (username: string, password: string) => {
     try {
-      // Verifica se o usuário já existe
       const usersRef = collection(db, 'users');
       const q = query(usersRef);
       const querySnapshot = await getDocs(q);
@@ -163,11 +203,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('Nome de usuário já está em uso');
       }
 
-      // Cria o usuário no Authentication
       const email = `${username}@user.com`;
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
-      // Cria o documento do usuário no Firestore
       await setDoc(doc(db, 'users', userCredential.user.uid), {
         username,
         isAdmin: false,
@@ -175,11 +213,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createdAt: new Date().toISOString()
       });
 
-      // Inicializa os dados do usuário
-      await setDoc(doc(db, 'userData', userCredential.user.uid), {
-        transactions: [],
-        categories: []
-      });
+      const initialUserData = { transactions: [], categories: [] };
+      await setDoc(doc(db, 'userData', userCredential.user.uid), initialUserData);
 
     } catch (error: any) {
       console.error('Error in signUp:', error);
@@ -192,16 +227,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try {
-      if (user?.isAdmin) {
-        // Para admin, apenas limpa o estado
-        setUser(null);
-        setUserData(null);
-      } else {
-        // Para usuários regulares, faz logout do Firebase
+      if (!user?.isAdmin) {
         await firebaseSignOut(auth);
       }
+      
+      // Clear stored data
+      localStorage.removeItem(USER_STORAGE_KEY);
+      localStorage.removeItem(USER_DATA_STORAGE_KEY);
+      
+      // Reset states
+      setUser(null);
+      setUserData(null);
+      
+      // Navigate to login page
+      navigate('/login');
     } catch (error) {
       console.error('Error signing out:', error);
+      throw error;
     }
   };
 
@@ -216,8 +258,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ...data
       };
 
-      await updateDoc(doc(db, 'userData', user.uid), updatedData);
+      if (!user.isAdmin) {
+        await updateDoc(doc(db, 'userData', user.uid), updatedData);
+      }
+      
       setUserData(updatedData);
+      localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(updatedData));
     } catch (error) {
       console.error('Error updating user data:', error);
       throw error;
