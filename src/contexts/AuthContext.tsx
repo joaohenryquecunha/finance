@@ -37,6 +37,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   getUserData: () => { transactions: Transaction[]; categories: Category[]; } | null;
   updateUserData: (data: { transactions?: Transaction[]; categories?: Category[]; }) => Promise<void>;
+  updateUsername: (newUsername: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -82,9 +83,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser && !user?.isAdmin) { // Skip for admin user
+      if (firebaseUser && !user?.isAdmin) {
         try {
-          // Skip fetching if we already have the user data
           if (user?.uid === firebaseUser.uid) {
             return;
           }
@@ -100,7 +100,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
             setUser(newUser);
 
-            // Fetch user data if not already loaded
             const userDataDoc = await getDoc(doc(db, 'userData', firebaseUser.uid));
             if (userDataDoc.exists()) {
               const newUserData = userDataDoc.data() as UserData;
@@ -128,9 +127,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, [user]);
 
+  const updateUsername = async (newUsername: string) => {
+    if (!user) throw new Error('Usuário não autenticado');
+    if (user.isAdmin) throw new Error('Não é possível alterar o nome do administrador');
+
+    try {
+      // Check if username is already taken
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef);
+      const querySnapshot = await getDocs(q);
+      const exists = querySnapshot.docs.some(doc => 
+        doc.data().username === newUsername && doc.id !== user.uid
+      );
+      
+      if (exists) {
+        throw new Error('Nome de usuário já está em uso');
+      }
+
+      // Update username in Firestore
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        username: newUsername
+      });
+
+      // Update local state
+      setUser(prev => prev ? { ...prev, username: newUsername } : null);
+
+    } catch (error) {
+      console.error('Error updating username:', error);
+      throw error;
+    }
+  };
+
   const signIn = async (username: string, password: string, isAdminLogin?: boolean) => {
     try {
-      // Admin login
       if (isAdminLogin) {
         if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
           const adminUser = {
@@ -148,7 +178,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('Credenciais de administrador inválidas');
       }
 
-      // Regular user login
       const email = `${username}@user.com`;
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       
@@ -174,7 +203,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
       setUser(newUser);
 
-      // Load user data
       const userDataDoc = await getDoc(doc(db, 'userData', userCredential.user.uid));
       if (userDataDoc.exists()) {
         setUserData(userDataDoc.data() as UserData);
@@ -231,15 +259,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await firebaseSignOut(auth);
       }
       
-      // Clear stored data
       localStorage.removeItem(USER_STORAGE_KEY);
       localStorage.removeItem(USER_DATA_STORAGE_KEY);
       
-      // Reset states
       setUser(null);
       setUserData(null);
       
-      // Navigate to login page
       navigate('/login');
     } catch (error) {
       console.error('Error signing out:', error);
@@ -277,7 +302,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signUp, 
       signOut,
       getUserData,
-      updateUserData
+      updateUserData,
+      updateUsername
     }}>
       {children}
     </AuthContext.Provider>

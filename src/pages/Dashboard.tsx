@@ -19,7 +19,7 @@ type DateFilter = 'day' | 'month' | 'year';
 const TIMEZONE = 'America/Sao_Paulo';
 
 export const Dashboard: React.FC = () => {
-  const { user, signOut, getUserData, updateUserData } = useAuth();
+  const { user, signOut, getUserData, updateUserData, updateUsername } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(defaultCategories);
   const [showCategoryManager, setShowCategoryManager] = useState(false);
@@ -89,7 +89,6 @@ export const Dashboard: React.FC = () => {
       await updateUserData({ transactions: updatedTransactions });
     } catch (error) {
       console.error('Error deleting transaction:', error);
-      // Restore the transactions if the update fails
       setTransactions(transactions);
     }
   };
@@ -111,8 +110,12 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleUpdateUsername = async (newUsername: string) => {
-    // In a real application, you would update the username in your backend here
-    console.log('Username updated:', newUsername);
+    try {
+      await updateUsername(newUsername);
+    } catch (error) {
+      console.error('Error updating username:', error);
+      throw error;
+    }
   };
 
   const getFilteredTransactions = () => {
