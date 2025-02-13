@@ -10,15 +10,16 @@ import { FinancialHealthChart } from '../components/FinancialHealthChart';
 import { ProfileEditor } from '../components/ProfileEditor';
 import { defaultCategories } from '../data';
 import { Transaction, Category } from '../types';
-import { LogOut, Wallet, TrendingUp, TrendingDown, Settings, Menu, UserCircle, Pencil } from 'lucide-react';
+import { LogOut, Wallet, TrendingUp, TrendingDown, Settings, Menu, UserCircle, Pencil, DollarSign } from 'lucide-react';
 import { startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval, parseISO } from 'date-fns';
 import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
+import { useNavigate } from 'react-router-dom';
 
 type DateFilter = 'day' | 'month' | 'year';
 
 const TIMEZONE = 'America/Sao_Paulo';
 
-export const Dashboard: React.FC = () => {
+const Dashboard: React.FC = () => {
   const { user, signOut, getUserData, updateUserData, updateUsername } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(defaultCategories);
@@ -32,6 +33,7 @@ export const Dashboard: React.FC = () => {
     return now;
   });
   const [editingTransaction, setEditingTransaction] = useState<Transaction | undefined>();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const userData = getUserData();
@@ -186,6 +188,13 @@ export const Dashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <button
+                onClick={() => navigate('/goals')}
+                className="px-4 py-2 text-gray-300 hover:text-gold-primary transition-colors flex items-center gap-2"
+              >
+                <DollarSign size={20} />
+                <span>Metas</span>
+              </button>
+              <button
                 onClick={() => setShowCategoryManager(true)}
                 className="px-4 py-2 text-gray-300 hover:text-gold-primary transition-colors flex items-center gap-2"
               >
@@ -245,6 +254,16 @@ export const Dashboard: React.FC = () => {
         {/* Mobile Menu */}
         {showMobileMenu && (
           <div className="absolute top-full left-0 right-0 bg-dark-secondary border-t border-dark-tertiary py-2 px-4 shadow-gold-sm">
+            <button
+              onClick={() => {
+                navigate('/goals');
+                setShowMobileMenu(false);
+              }}
+              className="w-full text-left py-3 px-4 rounded-lg hover:bg-dark-tertiary transition-colors flex items-center gap-2 text-gray-300"
+            >
+              <DollarSign size={20} />
+              <span>Metas</span>
+            </button>
             <button
               onClick={() => {
                 setShowProfileEditor(true);
@@ -355,3 +374,7 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 };
+
+export default Dashboard;
+
+export { Dashboard }

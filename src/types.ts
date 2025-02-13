@@ -12,3 +12,13 @@ export interface Category {
   name: string;
   color: string;
 }
+
+export interface Goal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  endDate: string;
+  createdAt: string;
+  updatedAt: string;
+}
