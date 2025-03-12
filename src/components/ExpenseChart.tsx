@@ -63,15 +63,13 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
   onDateFilterChange,
   onSelectedDateChange
 }) => {
-  const getCategoryColor = (categoryName: string, type: 'income' | 'expense'): string => {
+  const getCategoryColor = (categoryName: string): string => {
+    // Remove the type suffix from category name
     const baseCategoryName = categoryName.replace(/ \(Receita\)| \(Despesa\)$/, '');
     
-    if (type === 'income') {
-      return '#10B981';
-    }
-    
+    // Find the category and use its defined color
     const category = categories.find(cat => cat.name === baseCategoryName);
-    return category?.color || '#9B9B9B';
+    return category?.color || '#9B9B9B'; // Fallback to gray if category not found
   };
 
   const filteredTransactions = transactions.filter(transaction => {
@@ -243,7 +241,7 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
                   {chartData.map((entry, index) => (
                     <Cell 
                       key={`cell-${index}`} 
-                      fill={getCategoryColor(entry.name, entry.type)}
+                      fill={getCategoryColor(entry.name)}
                       style={{
                         filter: 'drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.2))'
                       }}
@@ -278,7 +276,7 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
               >
                 <div
                   className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: getCategoryColor(entry.name, entry.type) }}
+                  style={{ backgroundColor: getCategoryColor(entry.name) }}
                 />
                 <span className="text-sm text-gray-300 truncate flex-1">
                   {entry.name}

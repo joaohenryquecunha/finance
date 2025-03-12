@@ -3,7 +3,8 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  deleteUser as firebaseDeleteUser
 } from 'firebase/auth';
 import { 
   doc, 
@@ -12,11 +13,13 @@ import {
   collection,
   query,
   getDocs,
-  updateDoc
+  updateDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { Transaction, Category } from '../types';
 import { useNavigate } from 'react-router-dom';
+import { differenceInDays, addDays } from 'date-fns';
 
 interface User {
   uid: string;
@@ -81,6 +84,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [userData]);
 
+  // Check user access status
+  const checkUserAccess = async (userDoc: any) => {
+    const createdAt = new Date(userDoc.createdAt);
+    const now = new Date();
+    const daysSinceCreation = differenceInDays(now, createdAt);
+
+    // If user has no access expiration date and account is older than 30 days
+    if (!userDoc.accessExpirationDate && daysSinceCreation > 30) {
+      await updateDoc(doc(db, 'users', userDoc.uid), {
+        isApproved: false
+      });
+      return false;
+    }
+
+    // If user has access expiration date and it has expired
+    if (userDoc.accessExpirationDate) {
+      const expirationDate = new Date(userDoc.accessExpirationDate);
+      if (now > expirationDate) {
+        await updateDoc(doc(db, 'users', userDoc.uid), {
+          isApproved: false
+        });
+        return false;
+      }
+    }
+
+    return userDoc.isApproved;
+  };
+
+  // Periodic check for user access status
+  useEffect(() => {
+    if (!user?.isAdmin && user?.uid) {
+      const checkAccess = async () => {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const hasAccess = await checkUserAccess(userDoc.data());
+          if (!hasAccess && user.isApproved) {
+            await firebaseSignOut(auth);
+            setUser(null);
+            setUserData(null);
+            navigate('/login');
+          }
+        }
+      };
+
+      // Check immediately and then every hour
+      checkAccess();
+      const interval = setInterval(checkAccess, 3600000); // 1 hour
+
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser && !user?.isAdmin) {
@@ -92,13 +147,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data();
+            
+            // Check access status
+            const hasAccess = await checkUserAccess(userData);
+            
             const newUser = {
               uid: firebaseUser.uid,
               username: userData.username,
               isAdmin: userData.isAdmin || false,
-              isApproved: userData.isApproved || false
+              isApproved: hasAccess
             };
             setUser(newUser);
+
+            if (!hasAccess) {
+              await firebaseSignOut(auth);
+              setUser(null);
+              setUserData(null);
+              navigate('/login');
+              return;
+            }
 
             const userDataDoc = await getDoc(doc(db, 'userData', firebaseUser.uid));
             if (userDataDoc.exists()) {
@@ -189,17 +256,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const userDocData = userDoc.data();
-
-      if (!userDocData.isApproved) {
+      
+      // Check access status
+      const hasAccess = await checkUserAccess(userDocData);
+      
+      if (!hasAccess) {
         await firebaseSignOut(auth);
-        throw new Error('Sua conta está aguardando aprovação do administrador');
+        throw new Error('Sua conta está bloqueada. Entre em contato com o administrador.');
       }
 
       const newUser = {
         uid: userCredential.user.uid,
         username: userDocData.username,
         isAdmin: userDocData.isAdmin || false,
-        isApproved: userDocData.isApproved
+        isApproved: hasAccess
       };
       setUser(newUser);
 
@@ -333,10 +403,38 @@ export const getAllUsers = async () => {
   }
 };
 
-export const approveUser = async (uid: string) => {
+export const approveUser = async (uid: string, duration: number) => {
   try {
-    await updateDoc(doc(db, 'users', uid), {
-      isApproved: true
+    const userRef = doc(db, 'users', uid);
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      throw new Error('Usuário não encontrado');
+    }
+
+    const userData = userDoc.data();
+    const currentDate = new Date();
+    let newExpirationDate: Date;
+
+    if (userData.accessExpirationDate) {
+      // If user already has an expiration date, add days to it
+      const currentExpiration = new Date(userData.accessExpirationDate);
+      if (currentExpiration > currentDate) {
+        // If current expiration is in the future, add days to it
+        newExpirationDate = addDays(currentExpiration, duration);
+      } else {
+        // If current expiration is in the past, add days from now
+        newExpirationDate = addDays(currentDate, duration);
+      }
+    } else {
+      // If user doesn't have an expiration date, set it from now
+      newExpirationDate = addDays(currentDate, duration);
+    }
+
+    await updateDoc(userRef, {
+      isApproved: true,
+      accessExpirationDate: newExpirationDate.toISOString(),
+      accessDuration: duration
     });
   } catch (error) {
     console.error('Error approving user:', error);
@@ -347,10 +445,29 @@ export const approveUser = async (uid: string) => {
 export const disapproveUser = async (uid: string) => {
   try {
     await updateDoc(doc(db, 'users', uid), {
-      isApproved: false
+      isApproved: false,
+      accessExpirationDate: null,
+      accessDuration: null
     });
   } catch (error) {
     console.error('Error disapproving user:', error);
+    throw error;
+  }
+};
+
+export const deleteUser = async (uid: string) => {
+  try {
+    // Delete user data from Firestore
+    await deleteDoc(doc(db, 'users', uid));
+    await deleteDoc(doc(db, 'userData', uid));
+
+    // Delete user from Firebase Auth
+    const user = auth.currentUser;
+    if (user && user.uid === uid) {
+      await firebaseDeleteUser(user);
+    }
+  } catch (error) {
+    console.error('Error deleting user:', error);
     throw error;
   }
 };

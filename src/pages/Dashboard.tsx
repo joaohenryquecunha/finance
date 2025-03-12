@@ -105,6 +105,24 @@ const Dashboard: React.FC = () => {
     await updateUserData({ categories: updatedCategories });
   };
 
+  const handleUpdateCategory = async (updatedCategory: Category) => {
+    const updatedCategories = categories.map(c =>
+      c.id === updatedCategory.id ? updatedCategory : c
+    );
+    setCategories(updatedCategories);
+    await updateUserData({ categories: updatedCategories });
+
+    // Update transactions with the new category name
+    if (transactions.some(t => t.category === updatedCategory.name)) {
+      const updatedTransactions = transactions.map(t => ({
+        ...t,
+        category: t.category === updatedCategory.name ? updatedCategory.name : t.category
+      }));
+      setTransactions(updatedTransactions);
+      await updateUserData({ transactions: updatedTransactions });
+    }
+  };
+
   const handleDeleteCategory = async (categoryId: string) => {
     const updatedCategories = categories.filter(category => category.id !== categoryId);
     setCategories(updatedCategories);
@@ -359,6 +377,7 @@ const Dashboard: React.FC = () => {
             categories={categories}
             onAddCategory={handleAddCategory}
             onDeleteCategory={handleDeleteCategory}
+            onUpdateCategory={handleUpdateCategory}
             onClose={() => setShowCategoryManager(false)}
           />
         )}
@@ -377,4 +396,4 @@ const Dashboard: React.FC = () => {
 
 export default Dashboard;
 
-export { Dashboard }
+export { Dashboard };
