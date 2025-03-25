@@ -114,7 +114,7 @@ export const Login: React.FC = () => {
             </div>
             <div className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
               <span className="text-gold-primary font-bold text-lg tracking-wider animate-slide-up">
-                Januzzi Finance
+                Uzzi Finance
               </span>
             </div>
           </div>
