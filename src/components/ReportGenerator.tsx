@@ -103,7 +103,7 @@ export const ReportGenerator: React.FC<ReportGeneratorProps> = ({
       // Logo e título
       doc.setFontSize(28);
       doc.setTextColor(COLORS.dark);
-      const title = 'Januzzi Finance';
+      const title = 'Uzzi Finance';
       const titleWidth = doc.getStringUnitWidth(title) * 28 / doc.internal.scaleFactor;
       const titleX = (doc.internal.pageSize.width - titleWidth) / 2;
       doc.text(title, titleX, 25);
