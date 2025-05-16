@@ -3,12 +3,12 @@ import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } f
 import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
 
 const firebaseConfig = { 
-  apiKey: "AIzaSyBflqbgJiZCjXnzOextYL1JVe2rrbwY9_s",
-  authDomain: "financeiro-3d76b.firebaseapp.com",
-  projectId: "financeiro-3d76b",
-  storageBucket: "financeiro-3d76b.firebasestorage.app",
-  messagingSenderId: "182167446099",
-  appId: "1:182167446099:web:074fc6eddd5f434f0e9ca6"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
@@ -19,7 +19,7 @@ export const db = getFirestore(app);
 // Setup admin user if it doesn't exist
 export const setupAdminUser = async () => {
   try {
-    const adminUsername = 'januzzi';
+    const adminUsername = import.meta.env.VITE_ADMIN_USERNAME;
     const adminEmail = `${adminUsername}@user.com`;
 
     // Verifica primeiro se o documento do admin existe no Firestore

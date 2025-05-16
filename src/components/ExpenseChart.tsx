@@ -64,12 +64,9 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
   onSelectedDateChange
 }) => {
   const getCategoryColor = (categoryName: string): string => {
-    // Remove the type suffix from category name
-    const baseCategoryName = categoryName.replace(/ \(Receita\)| \(Despesa\)$/, '');
-    
-    // Find the category and use its defined color
+    const baseCategoryName = categoryName.split(' (')[0];
     const category = categories.find(cat => cat.name === baseCategoryName);
-    return category?.color || '#9B9B9B'; // Fallback to gray if category not found
+    return category?.color || '#9B9B9B';
   };
 
   const filteredTransactions = transactions.filter(transaction => {
@@ -87,36 +84,55 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
     const category = transaction.category;
     if (!acc[category]) {
       acc[category] = {
+        name: category,
         income: 0,
-        expense: 0
+        expense: 0,
+        investment: 0
       };
     }
     if (transaction.type === 'income') {
       acc[category].income += transaction.amount;
-    } else {
+    } else if (transaction.type === 'expense') {
       acc[category].expense += transaction.amount;
+    } else {
+      acc[category].investment += transaction.amount;
     }
     return acc;
-  }, {} as Record<string, { income: number; expense: number }>);
+  }, {} as Record<string, { 
+    name: string; 
+    income: number; 
+    expense: number; 
+    investment: number;
+  }>);
 
   const chartData = Object.entries(transactionsByCategory)
-    .filter(([_, value]) => value.income > 0 || value.expense > 0)
-    .map(([categoryName, value]) => {
-      return [
-        {
-          name: `${categoryName} (Receita)`,
-          value: value.income,
-          type: 'income',
-          category: categoryName
-        },
-        {
-          name: `${categoryName} (Despesa)`,
-          value: value.expense,
-          type: 'expense',
-          category: categoryName
-        }
-      ];
-    }).flat().filter(item => item.value > 0);
+    .flatMap(([category, data]) => {
+      const items = [];
+      if (data.income > 0) {
+        items.push({
+          name: `${category} (Receita)`,
+          value: data.income,
+          category
+        });
+      }
+      if (data.expense > 0) {
+        items.push({
+          name: `${category} (Despesa)`,
+          value: data.expense,
+          category
+        });
+      }
+      if (data.investment > 0) {
+        items.push({
+          name: `${category} (Investimento)`,
+          value: data.investment,
+          category
+        });
+      }
+      return items;
+    })
+    .filter(item => item.value > 0)
+    .sort((a, b) => b.value - a.value);
 
   const formatDateLabel = () => {
     switch (dateFilter) {
@@ -134,19 +150,16 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
     
     switch (dateFilter) {
       case 'day':
-        // Para dia, mantemos o horário como meio-dia para evitar problemas de fuso
         const [year, month, day] = value.split('-').map(Number);
         newDate = new Date(year, month - 1, day, 12, 0, 0);
         break;
       
       case 'month':
-        // Para mês, definimos como dia 1 às 12:00
         const [yearMonth, monthMonth] = value.split('-').map(Number);
         newDate = new Date(yearMonth, monthMonth - 1, 1, 12, 0, 0);
         break;
       
       case 'year':
-        // Para ano, definimos como 1º de janeiro às 12:00
         newDate = new Date(parseInt(value), 0, 1, 12, 0, 0);
         break;
       
@@ -241,7 +254,7 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
                   {chartData.map((entry, index) => (
                     <Cell 
                       key={`cell-${index}`} 
-                      fill={getCategoryColor(entry.name)}
+                      fill={getCategoryColor(entry.category)}
                       style={{
                         filter: 'drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.2))'
                       }}
@@ -276,7 +289,7 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
               >
                 <div
                   className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: getCategoryColor(entry.name) }}
+                  style={{ backgroundColor: getCategoryColor(entry.category) }}
                 />
                 <span className="text-sm text-gray-300 truncate flex-1">
                   {entry.name}

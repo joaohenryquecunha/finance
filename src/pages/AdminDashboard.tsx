@@ -1,28 +1,232 @@
 import React, { useState, useEffect } from 'react';
-import { getAllUsers, approveUser, disapproveUser, deleteUser } from '../contexts/AuthContext';
-import { CheckCircle, XCircle, UserCheck, UserX, Search, LogOut, Users, Calendar, Lock, Clock, Trash2 } from 'lucide-react';
+import { getAllUsers, approveUser, disapproveUser, updateUserAccess } from '../contexts/AuthContext';
+import { CheckCircle, XCircle, UserCheck, UserX, Search, LogOut, Users, Clock, Calendar, AlertTriangle, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { formatDistanceToNow, differenceInDays, parseISO, addDays, format } from 'date-fns';
+import { getDiasRestantes } from '../utils/access';
+import { parseISO, addDays, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { doc, deleteDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface UserData {
   uid: string;
   username: string;
   isAdmin: boolean;
   isApproved: boolean;
-  createdAt: string;
   accessDuration?: number;
-  accessExpirationDate?: string | null;
+  createdAt?: string;
+  profile?: {
+    cpf: string;
+    phone: string;
+  };
 }
+
+interface AccessModalProps {
+  user: UserData;
+  onClose: () => void;
+  onSave: (userId: string, accessDuration: number, expirationDate: string) => Promise<void>;
+}
+
+interface DeleteUserModalProps {
+  user: UserData;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}
+
+const DeleteUserModal: React.FC<DeleteUserModalProps> = ({ user, onClose, onConfirm }) => {
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleDelete = async () => {
+    try {
+      setIsLoading(true);
+      await onConfirm();
+      onClose();
+    } catch (error) {
+      console.error('Error deleting user:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+      <div className="bg-dark-secondary w-full max-w-md rounded-xl">
+        <div className="p-4 border-b border-dark-tertiary">
+          <h2 className="text-lg font-semibold text-red-400">Excluir Usuário</h2>
+          <p className="text-sm text-gray-400 mt-1">{user.username}</p>
+        </div>
+
+        <div className="p-6">
+          <div className="flex items-center justify-center mb-4">
+            <div className="w-12 h-12 rounded-full bg-red-400/10 flex items-center justify-center">
+              <AlertTriangle className="w-8 h-8 text-red-400" />
+            </div>
+          </div>
+
+          <div className="text-center mb-6">
+            <p className="text-gray-200 mb-4">
+              Você está prestes a excluir permanentemente este usuário e todos os seus dados.
+            </p>
+            <p className="text-sm text-red-400 font-medium">
+              Esta ação não pode ser desfeita!
+            </p>
+          </div>
+
+          <div className="flex gap-4">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 text-gray-400 hover:text-gray-300 bg-dark-tertiary rounded-lg"
+              disabled={isLoading}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={isLoading}
+              className="flex-1 bg-red-500 text-white px-4 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
+            >
+              {isLoading ? 'Excluindo...' : 'Excluir Usuário'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AccessModal: React.FC<AccessModalProps> = ({ user, onClose, onSave }) => {
+  const [days, setDays] = useState('30');
+  const [isLoading, setIsLoading] = useState(false);
+  const [operation, setOperation] = useState<'add' | 'remove'>('add');
+
+  const handleSave = async () => {
+    try {
+      setIsLoading(true);
+      const daysNumber = parseInt(days);
+      
+      // Calculate new duration based on operation
+      let newDuration = user.accessDuration || 0;
+      if (operation === 'add') {
+        newDuration += (daysNumber * 24 * 60 * 60); // Convert days to seconds
+      } else {
+        newDuration = Math.max(0, newDuration - (daysNumber * 24 * 60 * 60));
+      }
+
+      // Calculate new expiration date
+      const startDate = user.createdAt ? new Date(user.createdAt) : new Date();
+      const expirationDate = addDays(startDate, Math.floor(newDuration / (24 * 60 * 60))).toISOString();
+
+      await onSave(user.uid, newDuration, expirationDate);
+      onClose();
+    } catch (error) {
+      console.error('Error updating access:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const currentDays = user.accessDuration ? Math.floor(user.accessDuration / (24 * 60 * 60)) : 0;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-dark-secondary rounded-xl w-full max-w-md">
+        <div className="p-4 border-b border-dark-tertiary">
+          <h2 className="text-lg font-semibold text-gold-primary">
+            Gerenciar Período de Acesso
+          </h2>
+          <p className="text-sm text-gray-400 mt-1">
+            {user.username}
+          </p>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <div className="bg-dark-tertiary rounded-lg p-4">
+            <p className="text-sm text-gray-400">Período atual</p>
+            <p className="text-lg font-medium text-gray-200 mt-1">
+              {currentDays} dias
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            <button
+              onClick={() => setOperation('add')}
+              className={`p-3 rounded-lg transition-colors ${
+                operation === 'add'
+                  ? 'bg-emerald-400/10 text-emerald-400 border-2 border-emerald-400'
+                  : 'bg-dark-tertiary text-gray-400 border-2 border-transparent'
+              }`}
+            >
+              Adicionar dias
+            </button>
+            <button
+              onClick={() => setOperation('remove')}
+              className={`p-3 rounded-lg transition-colors ${
+                operation === 'remove'
+                  ? 'bg-red-400/10 text-red-400 border-2 border-red-400'
+                  : 'bg-dark-tertiary text-gray-400 border-2 border-transparent'
+              }`}
+            >
+              Remover dias
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Quantidade de dias
+            </label>
+            <input
+              type="number"
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+              min="1"
+              className="w-full rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-3 focus:ring-2 focus:ring-gold-primary focus:border-transparent"
+              placeholder="Ex: 30"
+            />
+          </div>
+
+          <div className="bg-dark-tertiary rounded-lg p-4 mt-4">
+            <p className="text-sm text-gray-400">Após a alteração</p>
+            <p className={`text-lg font-medium mt-1 ${
+              operation === 'add' ? 'text-emerald-400' : 'text-red-400'
+            }`}>
+              {operation === 'add' 
+                ? `${currentDays + parseInt(days || '0')} dias`
+                : `${Math.max(0, currentDays - parseInt(days || '0'))} dias`
+              }
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-gray-400 hover:text-gold-primary"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={isLoading || !days || parseInt(days) <= 0}
+              className={`px-4 py-2 rounded-lg transition-colors disabled:opacity-50 ${
+                operation === 'add'
+                  ? 'bg-emerald-400 text-dark-primary hover:bg-emerald-500'
+                  : 'bg-red-400 text-dark-primary hover:bg-red-500'
+              }`}
+            >
+              {isLoading ? 'Salvando...' : operation === 'add' ? 'Adicionar' : 'Remover'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const AdminDashboard: React.FC = () => {
   const [users, setUsers] = useState<UserData[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showAccessModal, setShowAccessModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
-  const [accessDuration, setAccessDuration] = useState('30');
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [userToDelete, setUserToDelete] = useState<UserData | null>(null);
   const { signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -34,12 +238,10 @@ export const AdminDashboard: React.FC = () => {
     fetchUsers();
   }, []);
 
-  const handleApproveUser = async (uid: string, duration: number) => {
-    await approveUser(uid, duration);
+  const handleApproveUser = async (uid: string) => {
+    await approveUser(uid);
     const updatedUsers = await getAllUsers();
     setUsers(updatedUsers as UserData[]);
-    setShowAccessModal(false);
-    setSelectedUser(null);
   };
 
   const handleDisapproveUser = async (uid: string) => {
@@ -48,19 +250,24 @@ export const AdminDashboard: React.FC = () => {
     setUsers(updatedUsers as UserData[]);
   };
 
-  const handleDeleteUser = async (uid: string) => {
-    if (deletingId === uid) {
-      try {
-        await deleteUser(uid);
-        setUsers(users.filter(user => user.uid !== uid));
-        setDeletingId(null);
-      } catch (error) {
-        console.error('Error deleting user:', error);
-        alert('Erro ao deletar usuário');
-      }
-    } else {
-      setDeletingId(uid);
-      setTimeout(() => setDeletingId(null), 3000);
+  const handleUpdateAccess = async (userId: string, accessDuration: number) => {
+    await updateUserAccess(userId, accessDuration);
+    const updatedUsers = await getAllUsers();
+    setUsers(updatedUsers as UserData[]);
+  };
+
+  const handleDeleteUser = async (user: UserData) => {
+    try {
+      // Delete user document
+      await deleteDoc(doc(db, 'users', user.uid));
+      // Delete user data document
+      await deleteDoc(doc(db, 'userData', user.uid));
+      
+      // Update local state
+      setUsers(users.filter(u => u.uid !== user.uid));
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      throw error;
     }
   };
 
@@ -73,74 +280,26 @@ export const AdminDashboard: React.FC = () => {
     user.username.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const getRemainingDays = (user: UserData) => {
-    if (!user.accessExpirationDate) return 0;
-    try {
-      const expirationDate = parseISO(user.accessExpirationDate);
-      const now = new Date();
-      return Math.max(0, differenceInDays(expirationDate, now));
-    } catch (error) {
-      console.error('Error calculating remaining days:', error);
-      return 0;
-    }
-  };
-
-  const getAccessColor = (remainingDays: number) => {
-    if (remainingDays <= 0) return 'text-red-500';
-    if (remainingDays <= 3) return 'text-red-400';
-    if (remainingDays <= 5) return 'text-amber-400';
-    if (remainingDays <= 10) return 'text-yellow-400';
-    if (remainingDays <= 15) return 'text-lime-400';
-    return 'text-emerald-400';
-  };
-
-  const getUserStatus = (user: UserData) => {
-    if (user.isAdmin) return { label: 'Administrador', color: 'text-gold-primary' };
-    if (!user.isApproved) return { label: 'Pendente', color: 'text-red-400' };
-    
-    if (user.accessExpirationDate) {
-      try {
-        const expirationDate = parseISO(user.accessExpirationDate);
-        const now = new Date();
-        
-        if (now > expirationDate) {
-          return { label: 'Bloqueado', color: 'text-red-400' };
-        }
-        
-        const daysRemaining = differenceInDays(expirationDate, now);
-        return { 
-          label: `${daysRemaining} dias restantes`, 
-          color: getAccessColor(daysRemaining)
-        };
-      } catch (error) {
-        console.error('Error calculating user status:', error);
-        return { label: 'Erro no status', color: 'text-red-400' };
-      }
-    }
-    
-    return { label: 'Ativo', color: 'text-emerald-400' };
-  };
-
   // Calculate user statistics
   const totalUsers = users.length;
-  const activeUsers = users.filter(user => {
-    if (!user.isApproved) return false;
-    if (!user.accessExpirationDate) return true;
-    try {
-      return new Date() <= parseISO(user.accessExpirationDate);
-    } catch (error) {
-      return false;
-    }
+  const activeUsers = users.filter(user => user.isApproved).length;
+  const inactiveUsers = users.filter(user => !user.isApproved).length;
+  const trialUsers = users.filter(user => {
+    if (user.isAdmin) return false;
+    return getDiasRestantes(user.accessDuration, user.createdAt) > 0;
   }).length;
-  const blockedUsers = users.filter(user => {
-    if (!user.accessExpirationDate) return false;
-    try {
-      return new Date() > parseISO(user.accessExpirationDate);
-    } catch (error) {
-      return false;
-    }
-  }).length;
-  const pendingUsers = users.filter(user => !user.isApproved).length;
+
+  const getAccessStatus = (user: UserData) => {
+    if (user.isAdmin) return { text: 'Acesso permanente', color: 'text-emerald-400' };
+    const diasRestantes = getDiasRestantes(user.accessDuration, user.createdAt);
+    if (diasRestantes === 0) return { text: 'Expirado', color: 'text-red-400' };
+    return { text: `${diasRestantes} ${diasRestantes === 1 ? 'dia' : 'dias'} de acesso`, color: 'text-emerald-400' };
+  };
+
+  const getAccountAge = (createdAt?: string) => {
+    if (!createdAt) return 'Data desconhecida';
+    return formatDistanceToNow(parseISO(createdAt), { locale: ptBR, addSuffix: true });
+  };
 
   const StatCard: React.FC<{ title: string; value: number; icon: React.ReactNode }> = ({ title, value, icon }) => (
     <div className="bg-dark-tertiary rounded-lg p-4 flex items-center justify-between">
@@ -153,16 +312,6 @@ export const AdminDashboard: React.FC = () => {
       </div>
     </div>
   );
-
-  const formatExpirationDate = (date: string | null | undefined) => {
-    if (!date) return '';
-    try {
-      return format(parseISO(date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR });
-    } catch (error) {
-      console.error('Error formatting expiration date:', error);
-      return 'Data inválida';
-    }
-  };
 
   return (
     <div className="min-h-screen bg-dark-primary p-4 sm:p-6">
@@ -205,114 +354,106 @@ export const AdminDashboard: React.FC = () => {
               icon={<UserCheck size={24} />}
             />
             <StatCard
-              title="Usuários Bloqueados"
-              value={blockedUsers}
-              icon={<Lock size={24} />}
+              title="Usuários Inativos"
+              value={inactiveUsers}
+              icon={<UserX size={24} />}
             />
             <StatCard
-              title="Aguardando Aprovação"
-              value={pendingUsers}
-              icon={<UserX size={24} />}
+              title="Em Período de Teste"
+              value={trialUsers}
+              icon={<Clock size={24} />}
             />
           </div>
 
           <div className="space-y-4">
-            {filteredUsers.map((user) => {
-              const status = getUserStatus(user);
-              const remainingDays = getRemainingDays(user);
-              
-              return (
-                <div
-                  key={user.uid}
-                  className="bg-dark-tertiary rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-gray-200 font-medium">{user.username}</p>
-                        <p className={`text-sm ${status.color}`}>
-                          {status.label}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      <p className="text-sm text-gray-400">
-                        Criado {formatDistanceToNow(parseISO(user.createdAt), { addSuffix: true, locale: ptBR })}
-                      </p>
-                      {user.accessExpirationDate && (
-                        <>
-                          <p className="text-sm text-gray-400">
-                            Acesso até {formatExpirationDate(user.accessExpirationDate)}
-                          </p>
-                          <div className="flex items-center gap-2 text-sm">
-                            <Clock size={14} className={getAccessColor(remainingDays)} />
-                            <span className={getAccessColor(remainingDays)}>
-                              {remainingDays} {remainingDays === 1 ? 'dia' : 'dias'} de acesso
-                            </span>
-                          </div>
-                        </>
+            {filteredUsers.map((user) => (
+              <div
+                key={user.uid}
+                className="bg-dark-tertiary rounded-lg p-4"
+              >
+                <div className="flex flex-col sm:flex-row justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-gray-200 font-medium">{user.username}</p>
+                      {user.isAdmin ? (
+                        <span className="text-xs bg-gold-primary/20 text-gold-primary px-2 py-1 rounded-full">
+                          Administrador
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-gray-500/20 text-gray-300 px-2 py-1 rounded-full">
+                          Usuário
+                        </span>
                       )}
                     </div>
+                    <div className="flex items-center gap-4 mt-2">
+                      <div className="flex items-center gap-1 text-sm">
+                        <Clock size={16} className="text-gray-400" />
+                        <span className="text-gray-400">Criado: </span>
+                        <span className="text-gray-300">{getAccountAge(user.createdAt)}</span>
+                      </div>
+                      {!user.isAdmin && (
+                        <div className={`flex items-center gap-1 text-sm ${getAccessStatus(user).color}`}>
+                          <span>•</span>
+                          <span>{getAccessStatus(user).text}</span>
+                        </div>
+                      )}
+                    </div>
+                    {user.profile && (
+                      <div className="mt-2 text-sm text-gray-400">
+                        <span>CPF: {user.profile.cpf} • </span>
+                        <span>Telefone: {user.profile.phone}</span>
+                      </div>
+                    )}
                   </div>
-                  
+
                   {!user.isAdmin && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-4">
+                      <button
+                        onClick={() => setSelectedUser(user)}
+                        className="p-2 text-gray-400 hover:text-gold-primary hover:bg-dark-secondary rounded-lg transition-colors"
+                        title="Definir período de acesso"
+                      >
+                        <Calendar size={20} />
+                      </button>
+                      <div className="flex items-center">
+                        {user.isApproved ? (
+                          <CheckCircle className="w-5 h-5 text-emerald-400" />
+                        ) : (
+                          <XCircle className="w-5 h-5 text-red-400" />
+                        )}
+                        <span className="ml-2 text-sm text-gray-400">
+                          {user.isApproved ? 'Aprovado' : 'Pendente'}
+                        </span>
+                      </div>
                       {!user.isApproved ? (
                         <button
-                          onClick={() => {
-                            setSelectedUser(user);
-                            setAccessDuration('30');
-                            setShowAccessModal(true);
-                          }}
-                          className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 transition-colors"
+                          onClick={() => handleApproveUser(user.uid)}
+                          className="p-2 text-emerald-400 hover:bg-emerald-400/10 rounded-lg transition-colors"
+                          title="Aprovar usuário"
                         >
-                          <UserCheck size={20} />
-                          <span>Aprovar</span>
+                          <UserCheck className="w-5 h-5" />
                         </button>
                       ) : (
                         <button
                           onClick={() => handleDisapproveUser(user.uid)}
-                          className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 transition-colors"
+                          className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                          title="Revogar aprovação"
                         >
-                          <UserX size={20} />
-                          <span>Bloquear</span>
+                          <UserX className="w-5 h-5" />
                         </button>
                       )}
-                      
-                      {user.isApproved && (
-                        <button
-                          onClick={() => {
-                            setSelectedUser(user);
-                            setAccessDuration(remainingDays.toString());
-                            setShowAccessModal(true);
-                          }}
-                          className="flex items-center gap-2 px-4 py-2 bg-dark-secondary text-gray-300 rounded-lg hover:text-gold-primary transition-colors"
-                          title="Alterar período de acesso"
-                        >
-                          <Calendar size={20} />
-                          <span className="hidden sm:inline">Adicionar Dias</span>
-                        </button>
-                      )}
-
                       <button
-                        onClick={() => handleDeleteUser(user.uid)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                          deletingId === user.uid
-                            ? 'bg-red-500/20 text-red-400'
-                            : 'bg-dark-secondary text-gray-300 hover:text-red-400'
-                        }`}
-                        title={deletingId === user.uid ? 'Confirmar exclusão' : 'Deletar usuário'}
+                        onClick={() => setUserToDelete(user)}
+                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                        title="Excluir usuário"
                       >
-                        <Trash2 size={20} />
-                        <span className="hidden sm:inline">
-                          {deletingId === user.uid ? 'Confirmar' : 'Deletar'}
-                        </span>
+                        <Trash2 className="w-5 h-5" />
                       </button>
                     </div>
                   )}
                 </div>
-              );
-            })}
+              </div>
+            ))}
 
             {filteredUsers.length === 0 && (
               <p className="text-center text-gray-400 py-4">
@@ -323,80 +464,20 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Access Duration Modal */}
-      {showAccessModal && selectedUser && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-dark-secondary rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-semibold text-gold-primary mb-4">
-              {selectedUser.isApproved ? 'Adicionar Dias de Acesso' : 'Definir Período de Acesso'}
-            </h2>
-            
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                {selectedUser.isApproved ? 'Dias a adicionar' : 'Duração do Acesso (em dias)'}
-              </label>
-              <input
-                type="number"
-                min="1"
-                value={accessDuration}
-                onChange={(e) => setAccessDuration(e.target.value)}
-                className="w-full rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-3 focus:ring-2 focus:ring-gold-primary focus:border-transparent"
-              />
-            </div>
+      {selectedUser && (
+        <AccessModal
+          user={selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onSave={handleUpdateAccess}
+        />
+      )}
 
-            <div className="text-sm text-gray-400 mb-6 space-y-2">
-              {selectedUser.isApproved && selectedUser.accessExpirationDate && (
-                <p>
-                  Dias atuais: {getRemainingDays(selectedUser)} dias
-                </p>
-              )}
-              {accessDuration && (
-                <p>
-                  {selectedUser.isApproved ? 'Novo total de dias: ' : 'Total de dias: '}
-                  <span className="text-gold-primary font-medium">
-                    {selectedUser.isApproved 
-                      ? (getRemainingDays(selectedUser) + parseInt(accessDuration))
-                      : accessDuration
-                    } dias
-                  </span>
-                </p>
-              )}
-              <p>
-                Acesso válido até:{' '}
-                <span className="text-gold-primary font-medium">
-                  {format(
-                    addDays(
-                      selectedUser.isApproved && selectedUser.accessExpirationDate
-                        ? parseISO(selectedUser.accessExpirationDate)
-                        : new Date(),
-                      parseInt(accessDuration)
-                    ),
-                    "dd 'de' MMMM 'de' yyyy",
-                    { locale: ptBR }
-                  )}
-                </span>
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-4">
-              <button
-                onClick={() => {
-                  setShowAccessModal(false);
-                  setSelectedUser(null);
-                }}
-                className="px-4 py-2 text-gray-400 hover:text-gold-primary"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => handleApproveUser(selectedUser.uid, parseInt(accessDuration))}
-                className="px-4 py-2 bg-gold-primary text-dark-primary rounded-lg hover:bg-gold-hover transition-colors"
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
+      {userToDelete && (
+        <DeleteUserModal
+          user={userToDelete}
+          onClose={() => setUserToDelete(null)}
+          onConfirm={() => handleDeleteUser(userToDelete)}
+        />
       )}
     </div>
   );
