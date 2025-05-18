@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2 } from 'lucide-react';
+import { X, Plus, Trash2, Pencil } from 'lucide-react';
 import { Category } from '../types';
 
 interface CategoryManagerProps {
   categories: Category[];
   onAddCategory: (category: Omit<Category, 'id'>) => void;
   onDeleteCategory: (categoryId: string) => void;
+  onUpdateCategory: (category: Category) => void;
   onClose: () => void;
 }
 
@@ -13,9 +14,11 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
   categories,
   onAddCategory,
   onDeleteCategory,
+  onUpdateCategory,
   onClose
 }) => {
   const [newCategory, setNewCategory] = useState({ name: '', color: '#FFD700' });
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -26,12 +29,27 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newCategory.name.trim()) {
-      // Save category color to localStorage
-      localStorage.setItem(`category_color_${newCategory.name}`, newCategory.color);
+    if (editingCategory) {
+      onUpdateCategory({
+        ...editingCategory,
+        name: newCategory.name,
+        color: newCategory.color
+      });
+      setEditingCategory(null);
+    } else if (newCategory.name.trim()) {
       onAddCategory(newCategory);
-      setNewCategory({ name: '', color: '#FFD700' });
     }
+    setNewCategory({ name: '', color: '#FFD700' });
+  };
+
+  const handleEdit = (category: Category) => {
+    setEditingCategory(category);
+    setNewCategory({ name: category.name, color: category.color });
+  };
+
+  const handleCancel = () => {
+    setEditingCategory(null);
+    setNewCategory({ name: '', color: '#FFD700' });
   };
 
   return (
@@ -53,7 +71,7 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
               <div className="flex-1">
                 <input
                   type="text"
-                  placeholder="Nova categoria"
+                  placeholder={editingCategory ? "Novo nome da categoria" : "Nova categoria"}
                   value={newCategory.name}
                   onChange={(e) => setNewCategory(prev => ({ ...prev, name: e.target.value }))}
                   className="w-full rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-3 focus:ring-2 focus:ring-gold-primary focus:border-transparent text-base"
@@ -72,8 +90,17 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
                   type="submit"
                   className="bg-gold-primary text-dark-primary px-4 rounded-lg hover:bg-gold-hover transition-colors"
                 >
-                  <Plus size={24} />
+                  {editingCategory ? <Pencil size={24} /> : <Plus size={24} />}
                 </button>
+                {editingCategory && (
+                  <button
+                    type="button"
+                    onClick={handleCancel}
+                    className="bg-dark-tertiary text-gray-400 px-4 rounded-lg hover:text-gold-primary transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                )}
               </div>
             </div>
           </form>
@@ -91,15 +118,20 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
                   />
                   <span className="font-medium text-gray-200 text-base">{category.name}</span>
                 </div>
-                <button
-                  onClick={() => {
-                    localStorage.removeItem(`category_color_${category.name}`);
-                    onDeleteCategory(category.id);
-                  }}
-                  className="text-red-400 hover:text-red-300 p-2 rounded-lg"
-                >
-                  <Trash2 size={20} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleEdit(category)}
+                    className="text-gray-400 hover:text-gold-primary p-2 rounded-lg"
+                  >
+                    <Pencil size={20} />
+                  </button>
+                  <button
+                    onClick={() => onDeleteCategory(category.id)}
+                    className="text-red-400 hover:text-red-300 p-2 rounded-lg"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

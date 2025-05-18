@@ -4,9 +4,7 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
-  updatePassword,
-  EmailAuthProvider,
-  reauthenticateWithCredential
+  deleteUser as firebaseDeleteUser
 } from 'firebase/auth';
 import { 
   doc, 
@@ -16,20 +14,18 @@ import {
   query,
   getDocs,
   updateDoc,
-  onSnapshot
+  deleteDoc
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
-import { Transaction, Category, UserProfile } from '../types';
+import { Transaction, Category } from '../types';
 import { useNavigate } from 'react-router-dom';
+import { differenceInDays, addDays } from 'date-fns';
 
 interface User {
   uid: string;
   username: string;
   isAdmin: boolean;
   isApproved: boolean;
-  accessDuration?: number;
-  createdAt?: string;
-  profile?: UserProfile;
 }
 
 interface UserData {
@@ -40,22 +36,19 @@ interface UserData {
 interface AuthContextType {
   user: User | null;
   signIn: (username: string, password: string, isAdminLogin?: boolean) => Promise<void>;
-  signUp: (username: string, password: string, profile: UserProfile) => Promise<void>;
+  signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   getUserData: () => { transactions: Transaction[]; categories: Category[]; } | null;
   updateUserData: (data: { transactions?: Transaction[]; categories?: Category[]; }) => Promise<void>;
   updateUsername: (newUsername: string) => Promise<void>;
-  updateUserProfile: (profile: UserProfile) => Promise<void>;
-  updatePassword: (currentPassword: string, newPassword: string) => Promise<void>;
-  checkAccessExpiration: () => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Admin credentials from environment variables
+// Hardcoded admin credentials
 const ADMIN_CREDENTIALS = {
-  username: import.meta.env.VITE_ADMIN_USERNAME,
-  password: import.meta.env.VITE_ADMIN_PASSWORD
+  username: 'januzzi',
+  password: 'januzzi@!'
 };
 
 // Storage keys
@@ -91,58 +84,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [userData]);
 
-  // Effect to observe user document changes
-  useEffect(() => {
-    if (!user?.uid || user.isAdmin) return;
+  // Check user access status
+  const checkUserAccess = async (userDoc: any) => {
+    const createdAt = new Date(userDoc.createdAt);
+    const now = new Date();
+    const daysSinceCreation = differenceInDays(now, createdAt);
 
-    const userDocRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(userDocRef, (doc) => {
-      if (doc.exists()) {
-        const userData = doc.data();
-        const updatedUser = {
-          ...user,
-          accessDuration: userData.accessDuration,
-          isApproved: userData.isApproved
-        };
-        setUser(updatedUser);
+    // If user has no access expiration date and account is older than 30 days
+    if (!userDoc.accessExpirationDate && daysSinceCreation > 30) {
+      await updateDoc(doc(db, 'users', userDoc.uid), {
+        isApproved: false
+      });
+      return false;
+    }
 
-        // If accessDuration changed, redirect to success page
-        if (userData.accessDuration !== user.accessDuration) {
-          navigate(`/dashboard?payment_success=true&access_duration=${userData.accessDuration}`);
-        }
+    // If user has access expiration date and it has expired
+    if (userDoc.accessExpirationDate) {
+      const expirationDate = new Date(userDoc.accessExpirationDate);
+      if (now > expirationDate) {
+        await updateDoc(doc(db, 'users', userDoc.uid), {
+          isApproved: false
+        });
+        return false;
       }
-    });
+    }
 
-    return () => unsubscribe();
-  }, [user?.uid]);
-
-  // Effect to check access expiration periodically
-  useEffect(() => {
-    if (!user || user.isAdmin) return;
-
-    const checkAccess = () => {
-      if (checkAccessExpiration()) {
-        signOut();
-      }
-    };
-
-    const interval = setInterval(checkAccess, 60000); // Check every minute
-    return () => clearInterval(interval);
-  }, [user]);
-
-  const checkAccessExpiration = () => {
-    if (!user || user.isAdmin) return false;
-    if (user.isApproved) return false;
-    
-    // If no accessDuration is defined, access has expired
-    if (!user.accessDuration || !user.createdAt) return true;
-
-    const startTime = new Date(user.createdAt).getTime();
-    const now = new Date().getTime();
-    const elapsedSeconds = Math.floor((now - startTime) / 1000);
-
-    return elapsedSeconds >= user.accessDuration;
+    return userDoc.isApproved;
   };
+
+  // Periodic check for user access status
+  useEffect(() => {
+    if (!user?.isAdmin && user?.uid) {
+      const checkAccess = async () => {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const hasAccess = await checkUserAccess(userDoc.data());
+          if (!hasAccess && user.isApproved) {
+            await firebaseSignOut(auth);
+            setUser(null);
+            setUserData(null);
+            navigate('/login');
+          }
+        }
+      };
+
+      // Check immediately and then every hour
+      checkAccess();
+      const interval = setInterval(checkAccess, 3600000); // 1 hour
+
+      return () => clearInterval(interval);
+    }
+  }, [user]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -156,40 +148,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (userDoc.exists()) {
             const userData = userDoc.data();
             
-            // Check if access has expired
-            if (!userData.isAdmin && (!userData.accessDuration || !userData.createdAt)) {
-              await firebaseSignOut(auth);
-              setUser(null);
-              setUserData(null);
-              navigate('/login?expired=true');
-              return;
-            }
-
-            // Check if elapsed time exceeds duration
-            if (!userData.isAdmin && userData.accessDuration && userData.createdAt) {
-              const startTime = new Date(userData.createdAt).getTime();
-              const now = new Date().getTime();
-              const elapsedSeconds = Math.floor((now - startTime) / 1000);
-              
-              if (elapsedSeconds >= userData.accessDuration && !userData.isApproved) {
-                await firebaseSignOut(auth);
-                setUser(null);
-                setUserData(null);
-                navigate('/login?expired=true');
-                return;
-              }
-            }
-
+            // Check access status
+            const hasAccess = await checkUserAccess(userData);
+            
             const newUser = {
               uid: firebaseUser.uid,
               username: userData.username,
               isAdmin: userData.isAdmin || false,
-              isApproved: userData.isApproved || false,
-              accessDuration: userData.accessDuration,
-              createdAt: userData.createdAt,
-              profile: userData.profile
+              isApproved: hasAccess
             };
             setUser(newUser);
+
+            if (!hasAccess) {
+              await firebaseSignOut(auth);
+              setUser(null);
+              setUserData(null);
+              navigate('/login');
+              return;
+            }
 
             const userDataDoc = await getDoc(doc(db, 'userData', firebaseUser.uid));
             if (userDataDoc.exists()) {
@@ -211,13 +187,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await firebaseSignOut(auth);
           setUser(null);
           setUserData(null);
-          throw error;
         }
       }
     });
 
     return () => unsubscribe();
   }, [user]);
+
+  const updateUsername = async (newUsername: string) => {
+    if (!user) throw new Error('Usuário não autenticado');
+    if (user.isAdmin) throw new Error('Não é possível alterar o nome do administrador');
+
+    try {
+      // Check if username is already taken
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef);
+      const querySnapshot = await getDocs(q);
+      const exists = querySnapshot.docs.some(doc => 
+        doc.data().username === newUsername && doc.id !== user.uid
+      );
+      
+      if (exists) {
+        throw new Error('Nome de usuário já está em uso');
+      }
+
+      // Update username in Firestore
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        username: newUsername
+      });
+
+      // Update local state
+      setUser(prev => prev ? { ...prev, username: newUsername } : null);
+
+    } catch (error) {
+      console.error('Error updating username:', error);
+      throw error;
+    }
+  };
 
   const signIn = async (username: string, password: string, isAdminLogin?: boolean) => {
     try {
@@ -249,35 +256,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const userDocData = userDoc.data();
-
-      // Check if access duration is defined
-      if (!userDocData.isAdmin && (!userDocData.accessDuration || !userDocData.createdAt)) {
+      
+      // Check access status
+      const hasAccess = await checkUserAccess(userDocData);
+      
+      if (!hasAccess) {
         await firebaseSignOut(auth);
-        navigate('/login?expired=true');
-        throw new Error('Seu período de acesso expirou');
-      }
-
-      // Check if access has expired
-      if (!userDocData.isAdmin && userDocData.accessDuration && userDocData.createdAt) {
-        const startTime = new Date(userDocData.createdAt).getTime();
-        const now = new Date().getTime();
-        const elapsedSeconds = Math.floor((now - startTime) / 1000);
-        
-        if (elapsedSeconds >= userDocData.accessDuration && !userDocData.isApproved) {
-          await firebaseSignOut(auth);
-          navigate('/login?expired=true');
-          throw new Error('Seu período de acesso expirou');
-        }
+        throw new Error('Sua conta está bloqueada. Entre em contato com o administrador.');
       }
 
       const newUser = {
         uid: userCredential.user.uid,
         username: userDocData.username,
         isAdmin: userDocData.isAdmin || false,
-        isApproved: userDocData.isApproved || false,
-        accessDuration: userDocData.accessDuration,
-        createdAt: userDocData.createdAt,
-        profile: userDocData.profile
+        isApproved: hasAccess
       };
       setUser(newUser);
 
@@ -298,7 +290,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signUp = async (username: string, password: string, profile: UserProfile) => {
+  const signUp = async (username: string, password: string) => {
     try {
       const usersRef = collection(db, 'users');
       const q = query(usersRef);
@@ -312,14 +304,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const email = `${username}@user.com`;
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
-      const accessDuration = 30 * 24 * 60 * 60; // 30 days in seconds
-
       await setDoc(doc(db, 'users', userCredential.user.uid), {
         username,
         isAdmin: false,
-        isApproved: true,
-        accessDuration,
-        profile,
+        isApproved: false,
         createdAt: new Date().toISOString()
       });
 
@@ -377,77 +365,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const updateUsername = async (newUsername: string) => {
-    if (!user) throw new Error('Usuário não autenticado');
-    if (user.isAdmin) throw new Error('Não é possível alterar o nome do administrador');
-
-    try {
-      // Check if username is already taken
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef);
-      const querySnapshot = await getDocs(q);
-      const exists = querySnapshot.docs.some(doc => 
-        doc.data().username === newUsername && doc.id !== user.uid
-      );
-      
-      if (exists) {
-        throw new Error('Nome de usuário já está em uso');
-      }
-
-      // Update username in Firestore
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        username: newUsername
-      });
-
-      // Update local state
-      setUser(prev => prev ? { ...prev, username: newUsername } : null);
-
-    } catch (error) {
-      console.error('Error updating username:', error);
-      throw error;
-    }
-  };
-
-  const updateUserProfile = async (profile: UserProfile) => {
-    if (!user) throw new Error('Usuário não autenticado');
-    if (user.isAdmin) throw new Error('Não é possível atualizar perfil do administrador');
-
-    try {
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, { profile });
-      setUser(prev => prev ? { ...prev, profile } : null);
-    } catch (error) {
-      console.error('Error updating user profile:', error);
-      throw error;
-    }
-  };
-
-  const updateUserPassword = async (currentPassword: string, newPassword: string) => {
-    if (!user) throw new Error('Usuário não autenticado');
-    if (user.isAdmin) throw new Error('Não é possível alterar a senha do administrador');
-
-    try {
-      const firebaseUser = auth.currentUser;
-      if (!firebaseUser) throw new Error('Usuário não autenticado');
-
-      const email = `${user.username}@user.com`;
-      const credential = EmailAuthProvider.credential(email, currentPassword);
-      
-      // Reautenticate user
-      await reauthenticateWithCredential(firebaseUser, credential);
-      
-      // Update password
-      await updatePassword(firebaseUser, newPassword);
-    } catch (error: any) {
-      console.error('Error updating password:', error);
-      if (error.code === 'auth/wrong-password') {
-        throw new Error('Senha atual incorreta');
-      }
-      throw new Error('Erro ao atualizar senha');
-    }
-  };
-
   return (
     <AuthContext.Provider value={{ 
       user, 
@@ -456,10 +373,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signOut,
       getUserData,
       updateUserData,
-      updateUsername,
-      updateUserProfile,
-      updatePassword: updateUserPassword,
-      checkAccessExpiration
+      updateUsername
     }}>
       {children}
     </AuthContext.Provider>
@@ -489,10 +403,38 @@ export const getAllUsers = async () => {
   }
 };
 
-export const approveUser = async (uid: string) => {
+export const approveUser = async (uid: string, duration: number) => {
   try {
-    await updateDoc(doc(db, 'users', uid), {
-      isApproved: true
+    const userRef = doc(db, 'users', uid);
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      throw new Error('Usuário não encontrado');
+    }
+
+    const userData = userDoc.data();
+    const currentDate = new Date();
+    let newExpirationDate: Date;
+
+    if (userData.accessExpirationDate) {
+      // If user already has an expiration date, add days to it
+      const currentExpiration = new Date(userData.accessExpirationDate);
+      if (currentExpiration > currentDate) {
+        // If current expiration is in the future, add days to it
+        newExpirationDate = addDays(currentExpiration, duration);
+      } else {
+        // If current expiration is in the past, add days from now
+        newExpirationDate = addDays(currentDate, duration);
+      }
+    } else {
+      // If user doesn't have an expiration date, set it from now
+      newExpirationDate = addDays(currentDate, duration);
+    }
+
+    await updateDoc(userRef, {
+      isApproved: true,
+      accessExpirationDate: newExpirationDate.toISOString(),
+      accessDuration: duration
     });
   } catch (error) {
     console.error('Error approving user:', error);
@@ -503,7 +445,9 @@ export const approveUser = async (uid: string) => {
 export const disapproveUser = async (uid: string) => {
   try {
     await updateDoc(doc(db, 'users', uid), {
-      isApproved: false
+      isApproved: false,
+      accessExpirationDate: null,
+      accessDuration: null
     });
   } catch (error) {
     console.error('Error disapproving user:', error);
@@ -511,14 +455,19 @@ export const disapproveUser = async (uid: string) => {
   }
 };
 
-export const updateUserAccess = async (uid: string, accessDuration: number) => {
+export const deleteUser = async (uid: string) => {
   try {
-    await updateDoc(doc(db, 'users', uid), {
-      accessDuration,
-      createdAt: new Date().toISOString() // Reset the start time when updating access duration
-    });
+    // Delete user data from Firestore
+    await deleteDoc(doc(db, 'users', uid));
+    await deleteDoc(doc(db, 'userData', uid));
+
+    // Delete user from Firebase Auth
+    const user = auth.currentUser;
+    if (user && user.uid === uid) {
+      await firebaseDeleteUser(user);
+    }
   } catch (error) {
-    console.error('Error updating user access:', error);
+    console.error('Error deleting user:', error);
     throw error;
   }
 };

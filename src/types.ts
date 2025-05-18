@@ -4,22 +4,13 @@ export interface Transaction {
   amount: number;
   category: string;
   date: string;
-  type: 'income' | 'expense' | 'investment';
-  companyId?: string;
+  type: 'income' | 'expense';
 }
 
 export interface Category {
   id: string;
   name: string;
   color: string;
-}
-
-export interface Company {
-  id: string;
-  name: string;
-  cnpj: string;
-  userId: string;
-  createdAt: string;
 }
 
 export interface Goal {
@@ -30,19 +21,4 @@ export interface Goal {
   endDate: string;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface UserProfile {
-  cpf: string;
-  phone: string;
-}
-
-export interface User {
-  uid: string;
-  username: string;
-  isAdmin: boolean;
-  isApproved: boolean;
-  accessDuration?: number;
-  createdAt?: string;
-  profile?: UserProfile;
 }

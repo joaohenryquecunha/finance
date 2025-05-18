@@ -4,7 +4,7 @@ import { utcToZonedTime } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import { Transaction } from '../types';
 import { formatCurrency } from '../utils/format';
-import { Pencil, Trash2, MoreVertical, ArrowUpRight, ArrowDownRight, TrendingUp } from 'lucide-react';
+import { Pencil, Trash2, MoreVertical, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 
 const TIMEZONE = 'America/Sao_Paulo';
 
@@ -63,32 +63,6 @@ export const TransactionList: React.FC<TransactionListProps> = ({
     setDeletingId(null);
   };
 
-  const getTransactionIcon = (type: string) => {
-    switch (type) {
-      case 'income':
-        return <ArrowUpRight className="w-5 h-5 text-emerald-400" />;
-      case 'expense':
-        return <ArrowDownRight className="w-5 h-5 text-red-400" />;
-      case 'investment':
-        return <TrendingUp className="w-5 h-5 text-blue-400" />;
-      default:
-        return null;
-    }
-  };
-
-  const getTransactionColor = (type: string) => {
-    switch (type) {
-      case 'income':
-        return 'text-emerald-400 bg-emerald-400/10';
-      case 'expense':
-        return 'text-red-400 bg-red-400/10';
-      case 'investment':
-        return 'text-blue-400 bg-blue-400/10';
-      default:
-        return '';
-    }
-  };
-
   // Close menu when clicking outside
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -125,8 +99,14 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                   <div className="p-4">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${getTransactionColor(transaction.type)}`}>
-                          {getTransactionIcon(transaction.type)}
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                          transaction.type === 'income' ? 'bg-emerald-400/10' : 'bg-red-400/10'
+                        }`}>
+                          {transaction.type === 'income' ? (
+                            <ArrowUpRight className="w-5 h-5 text-emerald-400" />
+                          ) : (
+                            <ArrowDownRight className="w-5 h-5 text-red-400" />
+                          )}
                         </div>
                         <div>
                           <h3 className="font-medium text-gray-200 mb-0.5 line-clamp-1">
@@ -185,8 +165,7 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                     </div>
                     <div className="mt-3 pt-3 border-t border-dark-secondary">
                       <span className={`text-lg font-semibold ${
-                        transaction.type === 'income' ? 'text-emerald-400' : 
-                        transaction.type === 'investment' ? 'text-blue-400' : 'text-red-400'
+                        transaction.type === 'income' ? 'text-emerald-400' : 'text-red-400'
                       }`}>
                         {transaction.type === 'income' ? '+' : '-'} {formatCurrency(transaction.amount)}
                       </span>
@@ -198,12 +177,10 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                 <div className="hidden sm:flex sm:items-center justify-between p-4">
                   <div className="flex items-center space-x-4">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      transaction.type === 'income' ? 'bg-[#1C2B1C]' : 
-                      transaction.type === 'investment' ? 'bg-[#1C1C2B]' : 'bg-[#2B1C1C]'
+                      transaction.type === 'income' ? 'bg-[#1C2B1C]' : 'bg-[#2B1C1C]'
                     }`}>
                       <span className={`text-lg ${
-                        transaction.type === 'income' ? 'text-emerald-400' : 
-                        transaction.type === 'investment' ? 'text-blue-400' : 'text-red-400'
+                        transaction.type === 'income' ? 'text-emerald-400' : 'text-red-400'
                       }`}>
                         {transaction.type === 'income' ? '+' : '-'}
                       </span>
@@ -216,8 +193,7 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                   <div className="flex items-center justify-end gap-6">
                     <div className="text-right">
                       <p className={`font-medium text-base glow-text ${
-                        transaction.type === 'income' ? 'text-emerald-400' : 
-                        transaction.type === 'investment' ? 'text-blue-400' : 'text-red-400'
+                        transaction.type === 'income' ? 'text-emerald-400' : 'text-red-400'
                       }`}>
                         {formatCurrency(transaction.amount)}
                       </p>
