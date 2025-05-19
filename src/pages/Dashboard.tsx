@@ -349,7 +349,7 @@ export const Dashboard: React.FC = () => {
       {/* Navbar moderna */}
       <header className="bg-dark-secondary shadow-gold-sm border-b border-dark-tertiary">
         <div className="max-w-7xl mx-auto px-6">
-          <nav className="flex items-center justify-between h-20">
+          <nav className="hidden lg:flex items-center justify-between h-20">
             {/* Esquerda: Logo e usuário */}
             <div className="flex items-center gap-6">
               <div className="bg-dark-tertiary p-3 rounded-full flex items-center justify-center">
