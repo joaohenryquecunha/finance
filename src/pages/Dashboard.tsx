@@ -15,7 +15,7 @@ import { PaymentSuccessModal } from '../components/PaymentSuccessModal';
 import { defaultCategories } from '../data';
 import { Transaction, Category, Company } from '../types';
 import { LogOut, Wallet, TrendingUp, TrendingDown, Settings, Menu, UserCircle, Pencil, DollarSign, Building2, Landmark, FileDown, X } from 'lucide-react';
-import { startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval, parseISO, subMonths } from 'date-fns';
+import { startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval, parseISO } from 'date-fns';
 import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -60,6 +60,10 @@ export const Dashboard: React.FC = () => {
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   }); // yyyy-MM já inicia com mês atual
   const [selectedReportYear, setSelectedReportYear] = useState<string>(String(currentYear)); // ano atual
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   const months = [
     'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
     'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
@@ -159,8 +163,14 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const getFilteredTransactions = (date: Date = selectedDate) => {
-    const range = getDateRange(date, dateFilter);
+  // Atualizar getFilteredTransactions para aceitar selectedMonth
+  const getFilteredTransactions = (date: Date = selectedDate, monthStr?: string) => {
+    let dateToUse = date;
+    if (monthStr) {
+      const [year, month] = monthStr.split('-').map(Number);
+      dateToUse = new Date(year, month - 1, 1);
+    }
+    const range = getDateRange(dateToUse, dateFilter);
     return transactions.filter(transaction => {
       const transactionDate = utcToZonedTime(parseISO(transaction.date), TIMEZONE);
       const startDate = utcToZonedTime(range.start, TIMEZONE);
@@ -174,8 +184,10 @@ export const Dashboard: React.FC = () => {
   };
 
   const calculateTrend = (currentAmount: number, type: 'income' | 'expense' | 'investment') => {
-    const previousMonth = subMonths(selectedDate, 1);
-    const previousTransactions = getFilteredTransactions(previousMonth);
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const previousMonth = new Date(year, month - 2, 1); // mês anterior
+    const previousMonthStr = `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
+    const previousTransactions = getFilteredTransactions(previousMonth, previousMonthStr);
     
     const previousAmount = previousTransactions.reduce((acc, transaction) => 
       transaction.type === type ? acc + transaction.amount : acc, 0);
@@ -185,8 +197,9 @@ export const Dashboard: React.FC = () => {
     return Math.round(((currentAmount - previousAmount) / previousAmount) * 100);
   };
 
+  const filteredTransactions = getFilteredTransactions(selectedDate, selectedMonth);
+
   const calculateBalance = () => {
-    const filteredTransactions = getFilteredTransactions();
     return filteredTransactions.reduce((acc, transaction)  => {
       return transaction.type === 'income'
         ? acc + transaction.amount
@@ -195,7 +208,6 @@ export const Dashboard: React.FC = () => {
   };
 
   const calculateTotalIncome = () => {
-    const filteredTransactions = getFilteredTransactions();
     const total = filteredTransactions.reduce((acc, transaction) => {
       return transaction.type === 'income'
         ? acc + transaction.amount
@@ -208,7 +220,6 @@ export const Dashboard: React.FC = () => {
   };
 
   const calculateTotalExpenses = () => {
-    const filteredTransactions = getFilteredTransactions();
     const total = filteredTransactions.reduce((acc, transaction) => {
       return transaction.type === 'expense'
         ? acc + transaction.amount
@@ -221,7 +232,6 @@ export const Dashboard: React.FC = () => {
   };
 
   const calculateTotalInvestments = () => {
-    const filteredTransactions = getFilteredTransactions();
     const total = filteredTransactions.reduce((acc, transaction) => {
       return transaction.type === 'investment'
         ? acc + transaction.amount
@@ -316,6 +326,12 @@ export const Dashboard: React.FC = () => {
   const income = calculateTotalIncome();
   const expenses = calculateTotalExpenses();
   const investments = calculateTotalInvestments();
+
+  // Atualizar selectedDate ao mudar selectedMonth
+  useEffect(() => {
+    const [year, month] = selectedMonth.split('-').map(Number);
+    setSelectedDate(new Date(year, month - 1, 1));
+  }, [selectedMonth]);
 
   // Fecha o menu ao clicar fora
   useEffect(() => {
@@ -596,7 +612,11 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div className="mb-6">
-          <FinancialHealthChart transactions={transactions} />
+          <FinancialHealthChart 
+            transactions={transactions}
+            selectedMonth={selectedMonth}
+            onMonthChange={setSelectedMonth}
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

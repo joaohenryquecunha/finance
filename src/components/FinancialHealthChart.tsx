@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { utcToZonedTime } from 'date-fns-tz';
@@ -6,16 +6,13 @@ import { Transaction } from '../types';
 
 interface FinancialHealthChartProps {
   transactions: Transaction[];
+  selectedMonth: string;
+  onMonthChange: (month: string) => void;
 }
 
 const TIMEZONE = 'America/Sao_Paulo';
 
-export const FinancialHealthChart: React.FC<FinancialHealthChartProps> = ({ transactions }) => {
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
-
+export const FinancialHealthChart: React.FC<FinancialHealthChartProps> = ({ transactions, selectedMonth, onMonthChange }) => {
   const calculateHealthScore = () => {
     const [year, month] = selectedMonth.split('-').map(Number);
     
@@ -103,7 +100,7 @@ export const FinancialHealthChart: React.FC<FinancialHealthChartProps> = ({ tran
         <input
           type="month"
           value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
+          onChange={(e) => onMonthChange(e.target.value)}
           className="w-full sm:w-auto rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent"
         />
       </div>
