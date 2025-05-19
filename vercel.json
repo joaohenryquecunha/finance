@@ -1,12 +1,3 @@
 {
-  "rewrites": [
-    {
-      "source": "/manutencao",
-      "destination": "/manutencao"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/manutencao"
-    }
-  ]
+    "rewrites": [{ "source": "/(.*)", "destination": "/" }]
 }
