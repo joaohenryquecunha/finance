@@ -1,272 +1,325 @@
-import React, { useState } from 'react';
-import { FileDown, X } from 'lucide-react';
-import { format, startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
+import React from 'react';
+import {
+  format,
+  startOfMonth,
+  endOfMonth,
+  startOfYear,
+  endOfYear,
+} from 'date-fns';
 import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Transaction, Category } from '../types';
+import { Transaction, Category, Company } from '../types';
 import { formatCurrency } from '../utils/format';
+import { FileDown } from 'lucide-react';
 
-type DateFilter = 'day' | 'month' | 'year';
+declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: {
+      previous: {
+        finalY: number;
+      };
+    };
+  }
+}
 
 interface ReportGeneratorProps {
   transactions: Transaction[];
   categories: Category[];
+  companies?: Company[];
   className?: string;
+  filter: 'month' | 'year';
+  period: string; // yyyy-MM para mês, yyyy para ano
+  onClose?: () => void;
+  disabled?: boolean;
 }
 
 const TIMEZONE = 'America/Sao_Paulo';
 
-// Cores do tema
 const COLORS = {
   primary: '#FFD700',
   secondary: '#DAA520',
   dark: '#1E1E1E',
   gray: '#4A4A4A',
   success: '#10B981',
-  danger: '#EF4444'
+  danger: '#EF4444',
+  info: '#3B82F6',
+  background: '#121212'
 };
 
 export const ReportGenerator: React.FC<ReportGeneratorProps> = ({ 
   transactions, 
   categories,
-  className = ''
+  companies = [],
+  className = '',
+  filter,
+  period,
+  onClose,
+  disabled
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('month');
-  const [selectedDate, setSelectedDate] = useState(utcToZonedTime(new Date(), TIMEZONE));
-
-  const getDateRange = (date: Date, filter: DateFilter) => {
-    const zonedDate = utcToZonedTime(date, TIMEZONE);
-    
-    switch (filter) {
-      case 'day':
-        return {
-          start: zonedTimeToUtc(startOfDay(zonedDate), TIMEZONE),
-          end: zonedTimeToUtc(endOfDay(zonedDate), TIMEZONE)
-        };
-      case 'month':
-        return {
-          start: zonedTimeToUtc(startOfMonth(zonedDate), TIMEZONE),
-          end: zonedTimeToUtc(endOfMonth(zonedDate), TIMEZONE)
-        };
-      case 'year':
-        return {
-          start: zonedTimeToUtc(startOfYear(zonedDate), TIMEZONE),
-          end: zonedTimeToUtc(endOfYear(zonedDate), TIMEZONE)
-        };
+  const getDateRange = () => {
+    if (filter === 'month' && period) {
+      const [year, month] = period.split('-').map(Number);
+      const date = new Date(year, month - 1, 1);
+      return {
+        start: zonedTimeToUtc(startOfMonth(date), TIMEZONE),
+        end: zonedTimeToUtc(endOfMonth(date), TIMEZONE)
+      };
     }
-  };
-
-  const handleDateChange = (value: string) => {
-    let newDate: Date;
-    
-    switch (dateFilter) {
-      case 'day':
-        const [year, month, day] = value.split('-').map(Number);
-        newDate = new Date(year, month - 1, day, 12, 0, 0);
-        break;
-      
-      case 'month':
-        const [yearMonth, monthMonth] = value.split('-').map(Number);
-        newDate = new Date(yearMonth, monthMonth - 1, 1, 12, 0, 0);
-        break;
-      
-      case 'year':
-        newDate = new Date(parseInt(value), 0, 1, 12, 0, 0);
-        break;
-      
-      default:
-        return;
+    if (filter === 'year' && period) {
+      const year = Number(period);
+      const date = new Date(year, 0, 1);
+      return {
+        start: zonedTimeToUtc(startOfYear(date), TIMEZONE),
+        end: zonedTimeToUtc(endOfYear(date), TIMEZONE)
+      };
     }
-
-    const zonedDate = utcToZonedTime(newDate, TIMEZONE);
-    setSelectedDate(zonedDate);
+    // fallback: mês atual
+    const now = new Date();
+    return {
+      start: zonedTimeToUtc(startOfMonth(now), TIMEZONE),
+      end: zonedTimeToUtc(endOfMonth(now), TIMEZONE)
+    };
   };
 
   const generatePDF = async () => {
-    setIsLoading(true);
     try {
-      const range = getDateRange(selectedDate, dateFilter);
-      const filteredTransactions = transactions.filter(transaction => {
-        const transactionDate = utcToZonedTime(new Date(transaction.date), TIMEZONE);
-        return transactionDate >= range.start && transactionDate <= range.end;
-      }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const range = getDateRange();
+      const filteredTransactions = transactions
+        .filter(transaction => {
+          const transactionDate = utcToZonedTime(new Date(transaction.date), TIMEZONE);
+          return transactionDate >= range.start && transactionDate <= range.end;
+        })
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      const totalIncome = filteredTransactions.reduce((sum, t) => t.type === 'income' ? sum + t.amount : sum, 0);
+      const totalExpense = filteredTransactions.reduce((sum, t) => t.type === 'expense' ? sum + t.amount : sum, 0);
+      const totalInvestment = filteredTransactions.reduce((sum, t) => t.type === 'investment' ? sum + t.amount : sum, 0);
+      const balance = totalIncome - totalExpense - totalInvestment;
 
       const doc = new jsPDF();
+
+      // Title Page
+      doc.setFillColor(COLORS.background);
+      doc.rect(0, 0, doc.internal.pageSize.width, doc.internal.pageSize.height, 'F');
       
-      // Configuração da fonte
       doc.setFont('helvetica', 'bold');
-      
-      // Logo e título
-      doc.setFontSize(28);
-      doc.setTextColor(COLORS.dark);
-      const title = 'Januzzi Finance';
-      const titleWidth = doc.getStringUnitWidth(title) * 28 / doc.internal.scaleFactor;
+      doc.setFontSize(32);
+      doc.setTextColor(COLORS.primary);
+      const title = 'Relatório Financeiro';
+      const titleWidth = doc.getStringUnitWidth(title) * 32 / doc.internal.scaleFactor;
       const titleX = (doc.internal.pageSize.width - titleWidth) / 2;
-      doc.text(title, titleX, 25);
+      doc.text(title, titleX, 80);
 
-      // Linha decorativa
-      doc.setDrawColor(COLORS.primary);
-      doc.setLineWidth(0.5);
-      doc.line(20, 30, doc.internal.pageSize.width - 20, 30);
-
-      // Período
-      doc.setFontSize(12);
+      // Period
+      doc.setFontSize(16);
       doc.setTextColor(COLORS.gray);
-      const periodText = `Período: ${format(range.start, dateFilter === 'day' ? "dd 'de' MMMM 'de' yyyy" : dateFilter === 'month' ? "MMMM 'de' yyyy" : 'yyyy', { locale: ptBR })}`;
-      const periodWidth = doc.getStringUnitWidth(periodText) * 12 / doc.internal.scaleFactor;
+      const periodText = `Período: ${format(range.start, "MMMM 'de' yyyy", { locale: ptBR })}`;
+      const periodWidth = doc.getStringUnitWidth(periodText) * 16 / doc.internal.scaleFactor;
       const periodX = (doc.internal.pageSize.width - periodWidth) / 2;
-      doc.text(periodText, periodX, 40);
+      doc.text(periodText, periodX, 100);
 
-      // Cálculo dos totais
-      const totalIncome = filteredTransactions.reduce((acc, t) => t.type === 'income' ? acc + t.amount : acc, 0);
-      const totalExpense = filteredTransactions.reduce((acc, t) => t.type === 'expense' ? acc + t.amount : acc, 0);
-      const balance = totalIncome - totalExpense;
+      // Generation date
+      doc.setFontSize(12);
+      const dateText = `Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`;
+      const dateWidth = doc.getStringUnitWidth(dateText) * 12 / doc.internal.scaleFactor;
+      const dateX = (doc.internal.pageSize.width - dateWidth) / 2;
+      doc.text(dateText, dateX, 120);
 
-      // Cards de resumo
-      const drawCard = (title: string, value: string, x: number, y: number, width: number, height: number, color: string) => {
-        // Fundo do card
-        doc.setFillColor(255, 255, 255);
-        doc.setDrawColor(color);
-        doc.setLineWidth(0.1);
-        doc.roundedRect(x, y, width, height, 3, 3, 'FD');
+      // Overall Summary Page
+      doc.addPage();
+      doc.setFillColor(COLORS.background);
+      doc.rect(0, 0, doc.internal.pageSize.width, 40, 'F');
 
-        // Título do card
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(COLORS.gray);
-        doc.text(title, x + 5, y + 10);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(24);
+      doc.setTextColor(COLORS.primary);
+      doc.text('Resumo Geral', 20, 30);
 
-        // Valor
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(12);
-        const valueWidth = doc.getStringUnitWidth(value) * 12 / doc.internal.scaleFactor;
-        const valueX = Math.min(x + 5, x + width - 5 - valueWidth);
-        doc.setTextColor(color);
-        doc.text(value, valueX, y + 25);
+      const drawCard = (x: number, y: number, width: number, height: number, borderColor: string, textColor: string) => {
+        doc.setFillColor('#000000'); // Fundo preto
+        doc.setDrawColor(borderColor);
+        doc.roundedRect(x, y, width, height, 5, 5, 'FD');
+        doc.setTextColor(textColor);
       };
 
-      // Desenha os cards
-      const cardWidth = 58;
-      const cardHeight = 35;
-      const spacing = 6;
-      const totalWidth = cardWidth * 3 + spacing * 2;
-      const startX = (doc.internal.pageSize.width - totalWidth) / 2;
-      
-      drawCard('Receitas', formatCurrency(totalIncome), startX, 50, cardWidth, cardHeight, COLORS.success);
-      drawCard('Despesas', formatCurrency(totalExpense), startX + cardWidth + spacing, 50, cardWidth, cardHeight, COLORS.danger);
-      drawCard('Saldo', formatCurrency(balance), startX + (cardWidth + spacing) * 2, 50, cardWidth, cardHeight, COLORS.primary);
+      const adjustSpacing = (currentY: number, additionalSpacing: number) => {
+        return currentY + additionalSpacing;
+      };
 
-      // Resumo por categoria
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.setTextColor(COLORS.dark);
-      doc.text('Resumo por Categoria', 14, 100);
+      // Resumo Geral como cards
+      const cardWidth = 80;
+      const cardHeight = 50;
+      const cardSpacing = 10;
+      const cardStartX = 20;
+      let cardStartY = 50;
 
-      const categoryTotals = filteredTransactions.reduce((acc, t) => {
-        if (!acc[t.category]) {
-          acc[t.category] = { income: 0, expense: 0 };
-        }
-        if (t.type === 'income') {
-          acc[t.category].income += t.amount;
-        } else {
-          acc[t.category].expense += t.amount;
-        }
-        return acc;
-      }, {} as Record<string, { income: number; expense: number }>);
+      const summaryCards = [
+        { label: 'Receitas Totais', value: formatCurrency(totalIncome), borderColor: '#28A745', textColor: '#28A745' },
+        { label: 'Despesas Totais', value: formatCurrency(totalExpense), borderColor: '#DC3545', textColor: '#DC3545' },
+        { label: 'Investimentos Totais', value: formatCurrency(totalInvestment), borderColor: '#007BFF', textColor: '#007BFF' },
+        { label: 'Saldo Final', value: formatCurrency(balance), borderColor: '#FFC107', textColor: '#FFC107' }
+      ];
 
-      // Tabela de categorias
-      const categoryData = Object.entries(categoryTotals).map(([category, totals]) => [
-        category,
-        totals.income > 0 ? formatCurrency(totals.income) : '-',
-        totals.expense > 0 ? formatCurrency(totals.expense) : '-',
-        formatCurrency(totals.income - totals.expense)
-      ]);
+      summaryCards.forEach((card, index) => {
+        const x = cardStartX + (index % 2) * (cardWidth + cardSpacing);
+        const y = cardStartY + Math.floor(index / 2) * (cardHeight + cardSpacing);
 
+        drawCard(x, y, cardWidth, cardHeight, card.borderColor, card.textColor);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.text(card.label, x + 5, y + 15);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
+        doc.text(card.value, x + 5, y + 30);
+      });
+
+      cardStartY = adjustSpacing(cardStartY, Math.ceil(summaryCards.length / 2) * (cardHeight + cardSpacing) + 20);
+
+      // Ajusta a seção de análise por categoria para começar após os cards
       autoTable(doc, {
-        startY: 110,
-        head: [['Categoria', 'Receitas', 'Despesas', 'Saldo']],
-        body: categoryData,
+        startY: cardStartY,
+        head: [['Categoria', 'Receitas', 'Despesas', 'Investimentos', 'Saldo']],
+        body: categories.map(category => {
+          const categoryTransactions = filteredTransactions.filter(t => t.category === category.name);
+          const income = categoryTransactions.reduce((sum, t) => 
+            t.type === 'income' ? sum + t.amount : sum, 0);
+          const expense = categoryTransactions.reduce((sum, t) => 
+            t.type === 'expense' ? sum + t.amount : sum, 0);
+          const investment = categoryTransactions.reduce((sum, t) => 
+            t.type === 'investment' ? sum + t.amount : sum, 0);
+          
+          return [
+            category.name,
+            formatCurrency(income),
+            formatCurrency(expense),
+            formatCurrency(investment),
+            formatCurrency(income - expense - investment)
+          ];
+        }),
         headStyles: {
           fillColor: COLORS.dark,
           textColor: COLORS.primary,
           fontStyle: 'bold',
-          fontSize: 11
+          fontSize: 10,
+          halign: 'center'
         },
         bodyStyles: {
-          fontSize: 10,
-          textColor: [0, 0, 0]
+          fontSize: 8,
+          halign: 'center'
         },
         alternateRowStyles: {
           fillColor: '#f8f8f8'
         },
-        theme: 'grid',
-        columnStyles: {
-          0: { cellWidth: 70, halign: 'left' },
-          1: { cellWidth: 40, halign: 'right' },
-          2: { cellWidth: 40, halign: 'right' },
-          3: { cellWidth: 40, halign: 'right' }
-        },
-        margin: { left: 14, right: 14 },
-        styles: {
-          cellPadding: { top: 4, right: 6, bottom: 4, left: 6 },
-          valign: 'middle',
-          overflow: 'linebreak',
-          lineWidth: 0.1
-        }
+        margin: { left: 15, right: 15 }
       });
 
-      // Tabela de transações
-      doc.addPage();
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.setTextColor(COLORS.dark);
-      doc.text('Detalhamento de Transações', 14, 20);
+      // Adiciona o título 'EMPRESAS' antes dos dados das empresas
+      if (companies.length > 0) {
+        doc.addPage();
+        doc.setFillColor(COLORS.background);
+        doc.rect(0, 0, doc.internal.pageSize.width, 40, 'F');
 
-      autoTable(doc, {
-        startY: 30,
-        head: [['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor']],
-        body: filteredTransactions.map(t => [
-          format(utcToZonedTime(new Date(t.date), TIMEZONE), 'dd/MM/yyyy'),
-          t.description,
-          t.category,
-          t.type === 'income' ? 'Receita' : 'Despesa',
-          formatCurrency(t.amount)
-        ]),
-        headStyles: {
-          fillColor: COLORS.dark,
-          textColor: COLORS.primary,
-          fontStyle: 'bold',
-          fontSize: 11
-        },
-        bodyStyles: {
-          fontSize: 10,
-          textColor: [0, 0, 0]
-        },
-        alternateRowStyles: {
-          fillColor: '#f8f8f8'
-        },
-        theme: 'grid',
-        columnStyles: {
-          0: { cellWidth: 25, halign: 'center' },
-          1: { cellWidth: 'auto', halign: 'left' },
-          2: { cellWidth: 35, halign: 'left' },
-          3: { cellWidth: 25, halign: 'center' },
-          4: { cellWidth: 35, halign: 'right' }
-        },
-        margin: { left: 14, right: 14 },
-        styles: {
-          cellPadding: { top: 4, right: 6, bottom: 4, left: 6 },
-          valign: 'middle',
-          overflow: 'linebreak',
-          lineWidth: 0.1
-        }
-      });
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(24);
+        doc.setTextColor(COLORS.primary);
+        doc.text('EMPRESAS', 20, 30);
 
-      // Rodapé
+        companies.forEach((company) => {
+          const companyTransactions = filteredTransactions.filter(t => t.companyId === company.id);
+          if (companyTransactions.length === 0) return;
+
+          let startY = doc.autoTable.previous?.finalY ? doc.autoTable.previous.finalY + 20 : 50;
+
+          // Verifica se há espaço suficiente na página atual, caso contrário, adiciona uma nova página
+          if (startY + 60 > doc.internal.pageSize.height) {
+            doc.addPage();
+            startY = 50;
+          }
+
+          // Cabeçalho da empresa
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(16);
+          doc.setTextColor(COLORS.primary);
+          doc.text(`Empresa: ${company.name}`, 20, startY);
+
+          doc.setFontSize(12);
+          doc.setTextColor(COLORS.gray);
+          doc.text(`CNPJ: ${company.cnpj.replace(/^\d{2}(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')}`, 20, startY + 10);
+
+          // Resumo da empresa como cards
+          const companyCardWidth = 80;
+          const companyCardHeight = 50;
+          const companyCardSpacing = 10;
+          const companyCardStartX = 20;
+          let companyCardStartY = startY + 20;
+
+          const companySummaryCards = [
+            { label: 'Receitas', value: formatCurrency(totalIncome), borderColor: '#28A745', textColor: '#28A745' },
+            { label: 'Despesas', value: formatCurrency(totalExpense), borderColor: '#DC3545', textColor: '#DC3545' },
+            { label: 'Investimentos', value: formatCurrency(totalInvestment), borderColor: '#007BFF', textColor: '#007BFF' },
+            { label: 'Saldo', value: formatCurrency(balance), borderColor: '#FFC107', textColor: '#FFC107' }
+          ];
+
+          companySummaryCards.forEach((card) => {
+            const x = companyCardStartX + (companySummaryCards.indexOf(card) % 2) * (companyCardWidth + companyCardSpacing);
+            const y = companyCardStartY + Math.floor(companySummaryCards.indexOf(card) / 2) * (companyCardHeight + companyCardSpacing);
+
+            // Verifica se há espaço suficiente para os cards, caso contrário, adiciona uma nova página
+            if (y + companyCardHeight > doc.internal.pageSize.height) {
+              doc.addPage();
+              companyCardStartY = 50;
+            }
+
+            drawCard(x, y, companyCardWidth, companyCardHeight, card.borderColor, card.textColor);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.text(card.label, x + 5, y + 15);
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(12);
+            doc.text(card.value, x + 5, y + 30);
+          });
+
+          companyCardStartY = adjustSpacing(companyCardStartY, Math.ceil(companySummaryCards.length / 2) * (companyCardHeight + companyCardSpacing) + 20);
+
+          // Tabela de transações da empresa
+          const transactionData = companyTransactions.map(t => [
+            format(utcToZonedTime(new Date(t.date), TIMEZONE), 'dd/MM/yyyy'),
+            t.description,
+            t.category,
+            t.type === 'income' ? 'Receita' : t.type === 'expense' ? 'Despesa' : 'Investimento',
+            formatCurrency(t.amount)
+          ]);
+
+          autoTable(doc, {
+            startY: companyCardStartY,
+            head: [['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor']],
+            body: transactionData,
+            headStyles: {
+              fillColor: COLORS.dark,
+              textColor: COLORS.primary,
+              fontStyle: 'bold',
+              fontSize: 10,
+              halign: 'center'
+            },
+            bodyStyles: {
+              fontSize: 8,
+              halign: 'center'
+            },
+            alternateRowStyles: {
+              fillColor: '#f8f8f8'
+            },
+            margin: { left: 15, right: 15 }
+          });
+        });
+      }
+
+      // Footer with page numbers
       const pageCount = doc.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
@@ -281,124 +334,24 @@ export const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         );
       }
 
-      doc.save(`relatorio-${format(range.start, 'yyyy-MM-dd')}.pdf`);
+      // Save the PDF
+      const fileName = `relatorio-${format(range.start, 'yyyy-MM-dd')}.pdf`;
+      doc.save(fileName);
+      if (onClose) onClose();
     } catch (error) {
       console.error('Erro ao gerar PDF:', error);
-    } finally {
-      setIsLoading(false);
-      setIsOpen(false);
-    }
-  };
-
-  const getDateInput = () => {
-    switch (dateFilter) {
-      case 'day':
-        return (
-          <input
-            type="date"
-            value={format(selectedDate, 'yyyy-MM-dd')}
-            onChange={(e) => handleDateChange(e.target.value)}
-            className="w-full rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent"
-          />
-        );
-      case 'month':
-        return (
-          <input
-            type="month"
-            value={format(selectedDate, 'yyyy-MM')}
-            onChange={(e) => handleDateChange(e.target.value)}
-            className="w-full rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent"
-          />
-        );
-      case 'year':
-        return (
-          <input
-            type="number"
-            value={format(selectedDate, 'yyyy')}
-            onChange={(e) => handleDateChange(e.target.value)}
-            min="1900"
-            max="2100"
-            className="w-full rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent"
-          />
-        );
     }
   };
 
   return (
-    <>
-      <button
-        onClick={() => setIsOpen(true)}
-        className={className}
-      >
-        <FileDown size={20} />
-        <span>Relatórios</span>
-      </button>
-
-      {isOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-dark-secondary rounded-xl p-4 sm:p-6 w-full max-w-md">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-lg font-semibold text-gold-primary">Gerar Relatório</h2>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="text-gray-400 hover:text-gold-primary p-1"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Tipo de Período
-                </label>
-                <select
-                  value={dateFilter}
-                  onChange={(e) => setDateFilter(e.target.value as DateFilter)}
-                  className="w-full rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent"
-                >
-                  <option value="day">Dia</option>
-                  <option value="month">Mês</option>
-                  <option value="year">Ano</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Selecione o Período
-                </label>
-                {getDateInput()}
-              </div>
-
-              <div className="flex justify-end gap-4 mt-6">
-                <button
-                  onClick={() => setIsOpen(false)}
-                  className="px-4 py-2 text-gray-400 hover:text-gold-primary"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={generatePDF}
-                  disabled={isLoading}
-                  className="bg-gold-primary text-dark-primary px-4 py-2 rounded-lg hover:bg-gold-hover transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  {isLoading ? (
-                    <>
-                      <span className="animate-spin">⌛</span>
-                      <span>Gerando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <FileDown size={20} />
-                      <span>Gerar PDF</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    <button
+      onClick={generatePDF}
+      className={className}
+      disabled={disabled}
+      style={disabled ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+    >
+      <FileDown size={32} className="text-gold-primary" />
+      <span>Gerar PDF</span>
+    </button>
   );
 };

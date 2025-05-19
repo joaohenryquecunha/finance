@@ -4,7 +4,9 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
-  deleteUser as firebaseDeleteUser
+  updatePassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential
 } from 'firebase/auth';
 import { 
   doc, 
@@ -14,18 +16,20 @@ import {
   query,
   getDocs,
   updateDoc,
-  deleteDoc
+  onSnapshot
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
-import { Transaction, Category } from '../types';
+import { Transaction, Category, UserProfile } from '../types';
 import { useNavigate } from 'react-router-dom';
-import { differenceInDays, addDays } from 'date-fns';
 
 interface User {
   uid: string;
   username: string;
   isAdmin: boolean;
   isApproved: boolean;
+  accessDuration?: number;
+  createdAt?: string;
+  profile?: UserProfile;
 }
 
 interface UserData {
@@ -36,24 +40,44 @@ interface UserData {
 interface AuthContextType {
   user: User | null;
   signIn: (username: string, password: string, isAdminLogin?: boolean) => Promise<void>;
-  signUp: (username: string, password: string) => Promise<void>;
+  signUp: (username: string, password: string, profile: UserProfile) => Promise<void>;
   signOut: () => Promise<void>;
   getUserData: () => { transactions: Transaction[]; categories: Category[]; } | null;
   updateUserData: (data: { transactions?: Transaction[]; categories?: Category[]; }) => Promise<void>;
   updateUsername: (newUsername: string) => Promise<void>;
+  updateUserProfile: (profile: UserProfile) => Promise<void>;
+  updatePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  checkAccessExpiration: () => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Hardcoded admin credentials
+// Admin credentials from environment variables
 const ADMIN_CREDENTIALS = {
-  username: 'januzzi',
-  password: 'januzzi@!'
+  username: import.meta.env.VITE_ADMIN_USERNAME,
+  password: import.meta.env.VITE_ADMIN_PASSWORD
 };
 
 // Storage keys
 const USER_STORAGE_KEY = 'jf_user';
 const USER_DATA_STORAGE_KEY = 'jf_user_data';
+
+// Helper function to remove undefined values from an object
+const removeUndefinedValues = (obj: Record<string, any>): Record<string, any> => {
+  const cleanObj = { ...obj };
+  Object.keys(cleanObj).forEach(key => {
+    if (cleanObj[key] === undefined) {
+      delete cleanObj[key];
+    } else if (Array.isArray(cleanObj[key])) {
+      cleanObj[key] = cleanObj[key].map((item: any) => 
+        typeof item === 'object' && item !== null ? removeUndefinedValues(item) : item
+      );
+    } else if (typeof cleanObj[key] === 'object' && cleanObj[key] !== null) {
+      cleanObj[key] = removeUndefinedValues(cleanObj[key]);
+    }
+  });
+  return cleanObj;
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
@@ -84,103 +108,132 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [userData]);
 
-  // Check user access status
-  const checkUserAccess = async (userDoc: any) => {
-    const createdAt = new Date(userDoc.createdAt);
-    const now = new Date();
-    const daysSinceCreation = differenceInDays(now, createdAt);
-
-    // If user has no access expiration date and account is older than 30 days
-    if (!userDoc.accessExpirationDate && daysSinceCreation > 30) {
-      await updateDoc(doc(db, 'users', userDoc.uid), {
-        isApproved: false
-      });
-      return false;
-    }
-
-    // If user has access expiration date and it has expired
-    if (userDoc.accessExpirationDate) {
-      const expirationDate = new Date(userDoc.accessExpirationDate);
-      if (now > expirationDate) {
-        await updateDoc(doc(db, 'users', userDoc.uid), {
-          isApproved: false
-        });
-        return false;
-      }
-    }
-
-    return userDoc.isApproved;
-  };
-
-  // Periodic check for user access status
+  // Effect to observe user document changes
   useEffect(() => {
-    if (!user?.isAdmin && user?.uid) {
-      const checkAccess = async () => {
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
-          const hasAccess = await checkUserAccess(userDoc.data());
-          if (!hasAccess && user.isApproved) {
-            await firebaseSignOut(auth);
-            setUser(null);
-            setUserData(null);
-            navigate('/login');
+    if (!user?.uid || user.isAdmin) return;
+
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const userData = docSnap.data();
+        if (
+          user.accessDuration !== userData.accessDuration ||
+          user.isApproved !== userData.isApproved
+        ) {
+          const updatedUser = {
+            ...user,
+            accessDuration: userData.accessDuration,
+            isApproved: userData.isApproved
+          };
+          setUser(updatedUser);
+
+          // If accessDuration changed, redirect to success page
+          if (userData.accessDuration !== user.accessDuration) {
+            navigate(`/dashboard?payment_success=true&access_duration=${userData.accessDuration}`);
           }
         }
-      };
+      }
+    });
 
-      // Check immediately and then every hour
-      checkAccess();
-      const interval = setInterval(checkAccess, 3600000); // 1 hour
+    return () => unsubscribe();
+  }, [user, navigate]);
 
-      return () => clearInterval(interval);
+  // --- Funções signOut e checkAccessExpiration ---
+  const checkAccessExpiration = () => {
+    if (!user || user.isAdmin) return false;
+    if (user.isApproved) return false;
+    if (!user.accessDuration || !user.createdAt) return true;
+    const startTime = new Date(user.createdAt).getTime();
+    const now = new Date().getTime();
+    const elapsedSeconds = Math.floor((now - startTime) / 1000);
+    return elapsedSeconds >= user.accessDuration;
+  };
+
+  const signOut = async () => {
+    try {
+      if (!user?.isAdmin) {
+        await firebaseSignOut(auth);
+      }
+      localStorage.removeItem(USER_STORAGE_KEY);
+      localStorage.removeItem(USER_DATA_STORAGE_KEY);
+      setUser(null);
+      setUserData(null);
+      navigate('/login');
+    } catch (error) {
+      console.error('Error signing out:', error);
+      throw error;
     }
-  }, [user]);
+  };
 
+  // --- useEffect que depende de signOut e checkAccessExpiration ---
+  useEffect(() => {
+    if (!user || user.isAdmin) return;
+
+    const checkAccess = () => {
+      if (checkAccessExpiration()) {
+        signOut();
+      }
+    };
+
+    const interval = setInterval(checkAccess, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [user, checkAccessExpiration, signOut]);
+
+  // Effect to sync with Firestore
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser && !user?.isAdmin) {
         try {
-          if (user?.uid === firebaseUser.uid) {
-            return;
-          }
-
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data();
             
-            // Check access status
-            const hasAccess = await checkUserAccess(userData);
-            
+            // Check if access has expired
+            if (!userData.isAdmin && (!userData.accessDuration || !userData.createdAt)) {
+              await firebaseSignOut(auth);
+              setUser(null);
+              setUserData(null);
+              navigate('/login?expired=true');
+              return;
+            }
+
+            // Check if elapsed time exceeds duration
+            if (!userData.isAdmin && userData.accessDuration && userData.createdAt) {
+              const startTime = new Date(userData.createdAt).getTime();
+              const now = new Date().getTime();
+              const elapsedSeconds = Math.floor((now - startTime) / 1000);
+              
+              if (elapsedSeconds >= userData.accessDuration && !userData.isApproved) {
+                await firebaseSignOut(auth);
+                setUser(null);
+                setUserData(null);
+                navigate('/login?expired=true');
+                return;
+              }
+            }
+
             const newUser = {
               uid: firebaseUser.uid,
               username: userData.username,
               isAdmin: userData.isAdmin || false,
-              isApproved: hasAccess
+              isApproved: userData.isApproved || false,
+              accessDuration: userData.accessDuration,
+              createdAt: userData.createdAt,
+              profile: userData.profile
             };
             setUser(newUser);
 
-            if (!hasAccess) {
-              await firebaseSignOut(auth);
-              setUser(null);
-              setUserData(null);
-              navigate('/login');
-              return;
-            }
+            // Set up real-time listener for user data
+            const userDataRef = doc(db, 'userData', firebaseUser.uid);
+            const unsubscribeUserData = onSnapshot(userDataRef, (snapshot) => {
+              if (snapshot.exists()) {
+                const data = snapshot.data() as UserData;
+                setUserData(data);
+                localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(data));
+              }
+            });
 
-            const userDataDoc = await getDoc(doc(db, 'userData', firebaseUser.uid));
-            if (userDataDoc.exists()) {
-              const newUserData = userDataDoc.data() as UserData;
-              setUserData(newUserData);
-            } else {
-              const initialUserData = { transactions: [], categories: [] };
-              await setDoc(doc(db, 'userData', firebaseUser.uid), initialUserData);
-              setUserData(initialUserData);
-            }
-          } else {
-            console.error('User document not found');
-            await firebaseSignOut(auth);
-            setUser(null);
-            setUserData(null);
+            return () => unsubscribeUserData();
           }
         } catch (error) {
           console.error('Error fetching user data:', error);
@@ -192,7 +245,153 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, navigate]);
+
+  const signIn = async (username: string, password: string, isAdminLogin?: boolean) => {
+    try {
+      if (isAdminLogin) {
+        if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+          const adminUser = {
+            uid: 'admin',
+            username: ADMIN_CREDENTIALS.username,
+            isAdmin: true,
+            isApproved: true
+          };
+          setUser(adminUser);
+          setUserData({ transactions: [], categories: [] });
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(adminUser));
+          localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify({ transactions: [], categories: [] }));
+          return;
+        }
+        throw new Error('Credenciais de administrador inválidas');
+      }
+
+      const email = `${username}@user.com`;
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+      
+      if (!userDoc.exists()) {
+        await firebaseSignOut(auth);
+        throw new Error('Usuário não encontrado');
+      }
+
+      const userDocData = userDoc.data();
+
+      // Check if access duration is defined
+      if (!userDocData.isAdmin && (!userDocData.accessDuration || !userDocData.createdAt)) {
+        await firebaseSignOut(auth);
+        navigate('/login?expired=true');
+        throw new Error('Seu período de acesso expirou');
+      }
+
+      // Check if access has expired
+      if (!userDocData.isAdmin && userDocData.accessDuration && userDocData.createdAt) {
+        const startTime = new Date(userDocData.createdAt).getTime();
+        const now = new Date().getTime();
+        const elapsedSeconds = Math.floor((now - startTime) / 1000);
+        
+        if (elapsedSeconds >= userDocData.accessDuration && !userDocData.isApproved) {
+          await firebaseSignOut(auth);
+          navigate('/login?expired=true');
+          throw new Error('Seu período de acesso expirou');
+        }
+      }
+
+      const newUser = {
+        uid: userCredential.user.uid,
+        username: userDocData.username,
+        isAdmin: userDocData.isAdmin || false,
+        isApproved: userDocData.isApproved || false,
+        accessDuration: userDocData.accessDuration,
+        createdAt: userDocData.createdAt,
+        profile: userDocData.profile
+      };
+      setUser(newUser);
+
+      // Set up real-time listener for user data
+      const userDataRef = doc(db, 'userData', userCredential.user.uid);
+      const unsubscribe = onSnapshot(userDataRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data() as UserData;
+          setUserData(data);
+          localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(data));
+        }
+      });
+
+    } catch (error: any) {
+      console.error('Error in signIn:', error);
+      if (error.code === 'auth/too-many-requests') {
+        throw new Error('Muitas tentativas de login. Por favor, aguarde alguns minutos e tente novamente.');
+      }
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-email') {
+        throw new Error('Usuário ou senha inválidos');
+      }
+      throw error;
+    }
+  };
+
+  const signUp = async (username: string, password: string, profile: UserProfile) => {
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef);
+      const querySnapshot = await getDocs(q);
+      const exists = querySnapshot.docs.some(doc => doc.data().username === username);
+      
+      if (exists) {
+        throw new Error('Nome de usuário já está em uso');
+      }
+
+      const email = `${username}@user.com`;
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+
+      const accessDuration = 30 * 24 * 60 * 60; // 30 days in seconds
+
+      await setDoc(doc(db, 'users', userCredential.user.uid), {
+        username,
+        isAdmin: false,
+        isApproved: true,
+        accessDuration,
+        profile,
+        createdAt: new Date().toISOString()
+      });
+
+      const initialUserData = { transactions: [], categories: [] };
+      await setDoc(doc(db, 'userData', userCredential.user.uid), initialUserData);
+
+    } catch (error: any) {
+      console.error('Error in signUp:', error);
+      if (error.code === 'auth/email-already-in-use') {
+        throw new Error('Nome de usuário já está em uso');
+      }
+      throw error;
+    }
+  };
+
+  const updateUserData = async (data: { transactions?: Transaction[]; categories?: Category[]; }) => {
+    if (!user) return;
+
+    try {
+      const updatedData = {
+        ...(userData || { transactions: [], categories: [] }),
+        ...data
+      };
+
+      // Remove any undefined values from the data
+      const cleanData = removeUndefinedValues(updatedData);
+
+      if (!user.isAdmin) {
+        const userDataRef = doc(db, 'userData', user.uid);
+        await updateDoc(userDataRef, cleanData);
+      }
+      
+      setUserData(cleanData as UserData);
+      localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(cleanData));
+    } catch (error) {
+      console.error('Error updating user data:', error);
+      throw error;
+    }
+  };
 
   const updateUsername = async (newUsername: string) => {
     if (!user) throw new Error('Usuário não autenticado');
@@ -226,144 +425,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signIn = async (username: string, password: string, isAdminLogin?: boolean) => {
+  const updateUserProfile = async (profile: UserProfile) => {
+    if (!user) throw new Error('Usuário não autenticado');
+    if (user.isAdmin) throw new Error('Não é possível atualizar perfil do administrador');
+
     try {
-      if (isAdminLogin) {
-        if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-          const adminUser = {
-            uid: 'admin',
-            username: ADMIN_CREDENTIALS.username,
-            isAdmin: true,
-            isApproved: true
-          };
-          setUser(adminUser);
-          setUserData({ transactions: [], categories: [] });
-          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(adminUser));
-          localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify({ transactions: [], categories: [] }));
-          return;
-        }
-        throw new Error('Credenciais de administrador inválidas');
-      }
-
-      const email = `${username}@user.com`;
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      
-      const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
-      
-      if (!userDoc.exists()) {
-        await firebaseSignOut(auth);
-        throw new Error('Usuário não encontrado');
-      }
-
-      const userDocData = userDoc.data();
-      
-      // Check access status
-      const hasAccess = await checkUserAccess(userDocData);
-      
-      if (!hasAccess) {
-        await firebaseSignOut(auth);
-        throw new Error('Sua conta está bloqueada. Entre em contato com o administrador.');
-      }
-
-      const newUser = {
-        uid: userCredential.user.uid,
-        username: userDocData.username,
-        isAdmin: userDocData.isAdmin || false,
-        isApproved: hasAccess
-      };
-      setUser(newUser);
-
-      const userDataDoc = await getDoc(doc(db, 'userData', userCredential.user.uid));
-      if (userDataDoc.exists()) {
-        setUserData(userDataDoc.data() as UserData);
-      }
-
-    } catch (error: any) {
-      console.error('Error in signIn:', error);
-      if (error.code === 'auth/too-many-requests') {
-        throw new Error('Muitas tentativas de login. Por favor, aguarde alguns minutos e tente novamente.');
-      }
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-email') {
-        throw new Error('Usuário ou senha inválidos');
-      }
-      throw error;
-    }
-  };
-
-  const signUp = async (username: string, password: string) => {
-    try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef);
-      const querySnapshot = await getDocs(q);
-      const exists = querySnapshot.docs.some(doc => doc.data().username === username);
-      
-      if (exists) {
-        throw new Error('Nome de usuário já está em uso');
-      }
-
-      const email = `${username}@user.com`;
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-
-      await setDoc(doc(db, 'users', userCredential.user.uid), {
-        username,
-        isAdmin: false,
-        isApproved: false,
-        createdAt: new Date().toISOString()
-      });
-
-      const initialUserData = { transactions: [], categories: [] };
-      await setDoc(doc(db, 'userData', userCredential.user.uid), initialUserData);
-
-    } catch (error: any) {
-      console.error('Error in signUp:', error);
-      if (error.code === 'auth/email-already-in-use') {
-        throw new Error('Nome de usuário já está em uso');
-      }
-      throw error;
-    }
-  };
-
-  const signOut = async () => {
-    try {
-      if (!user?.isAdmin) {
-        await firebaseSignOut(auth);
-      }
-      
-      localStorage.removeItem(USER_STORAGE_KEY);
-      localStorage.removeItem(USER_DATA_STORAGE_KEY);
-      
-      setUser(null);
-      setUserData(null);
-      
-      navigate('/login');
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, { profile });
+      setUser(prev => prev ? { ...prev, profile } : null);
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error('Error updating user profile:', error);
       throw error;
+    }
+  };
+
+  const updateUserPassword = async (currentPassword: string, newPassword: string) => {
+    if (!user) throw new Error('Usuário não autenticado');
+    if (user.isAdmin) throw new Error('Não é possível alterar a senha do administrador');
+
+    try {
+      const firebaseUser = auth.currentUser;
+      if (!firebaseUser) throw new Error('Usuário não autenticado');
+
+      const email = `${user.username}@user.com`;
+      const credential = EmailAuthProvider.credential(email, currentPassword);
+      
+      // Reautenticate user
+      await reauthenticateWithCredential(firebaseUser, credential);
+      
+      // Update password
+      await updatePassword(firebaseUser, newPassword);
+    } catch (error: any) {
+      console.error('Error updating password:', error);
+      if (error.code === 'auth/wrong-password') {
+        throw new Error('Senha atual incorreta');
+      }
+      throw new Error('Erro ao atualizar senha');
     }
   };
 
   const getUserData = () => userData;
-
-  const updateUserData = async (data: { transactions?: Transaction[]; categories?: Category[]; }) => {
-    if (!user) return;
-
-    try {
-      const updatedData = {
-        ...(userData || { transactions: [], categories: [] }),
-        ...data
-      };
-
-      if (!user.isAdmin) {
-        await updateDoc(doc(db, 'userData', user.uid), updatedData);
-      }
-      
-      setUserData(updatedData);
-      localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(updatedData));
-    } catch (error) {
-      console.error('Error updating user data:', error);
-      throw error;
-    }
-  };
 
   return (
     <AuthContext.Provider value={{ 
@@ -373,7 +474,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signOut,
       getUserData,
       updateUserData,
-      updateUsername
+      updateUsername,
+      updateUserProfile,
+      updatePassword: updateUserPassword,
+      checkAccessExpiration
     }}>
       {children}
     </AuthContext.Provider>
@@ -403,38 +507,10 @@ export const getAllUsers = async () => {
   }
 };
 
-export const approveUser = async (uid: string, duration: number) => {
+export const approveUser = async (uid: string) => {
   try {
-    const userRef = doc(db, 'users', uid);
-    const userDoc = await getDoc(userRef);
-    
-    if (!userDoc.exists()) {
-      throw new Error('Usuário não encontrado');
-    }
-
-    const userData = userDoc.data();
-    const currentDate = new Date();
-    let newExpirationDate: Date;
-
-    if (userData.accessExpirationDate) {
-      // If user already has an expiration date, add days to it
-      const currentExpiration = new Date(userData.accessExpirationDate);
-      if (currentExpiration > currentDate) {
-        // If current expiration is in the future, add days to it
-        newExpirationDate = addDays(currentExpiration, duration);
-      } else {
-        // If current expiration is in the past, add days from now
-        newExpirationDate = addDays(currentDate, duration);
-      }
-    } else {
-      // If user doesn't have an expiration date, set it from now
-      newExpirationDate = addDays(currentDate, duration);
-    }
-
-    await updateDoc(userRef, {
-      isApproved: true,
-      accessExpirationDate: newExpirationDate.toISOString(),
-      accessDuration: duration
+    await updateDoc(doc(db, 'users', uid), {
+      isApproved: true
     });
   } catch (error) {
     console.error('Error approving user:', error);
@@ -445,9 +521,7 @@ export const approveUser = async (uid: string, duration: number) => {
 export const disapproveUser = async (uid: string) => {
   try {
     await updateDoc(doc(db, 'users', uid), {
-      isApproved: false,
-      accessExpirationDate: null,
-      accessDuration: null
+      isApproved: false
     });
   } catch (error) {
     console.error('Error disapproving user:', error);
@@ -455,19 +529,14 @@ export const disapproveUser = async (uid: string) => {
   }
 };
 
-export const deleteUser = async (uid: string) => {
+export const updateUserAccess = async (uid: string, accessDuration: number) => {
   try {
-    // Delete user data from Firestore
-    await deleteDoc(doc(db, 'users', uid));
-    await deleteDoc(doc(db, 'userData', uid));
-
-    // Delete user from Firebase Auth
-    const user = auth.currentUser;
-    if (user && user.uid === uid) {
-      await firebaseDeleteUser(user);
-    }
+    await updateDoc(doc(db, 'users', uid), {
+      accessDuration,
+      createdAt: new Date().toISOString() // Reset the start time when updating access duration
+    });
   } catch (error) {
-    console.error('Error deleting user:', error);
+    console.error('Error updating user access:', error);
     throw error;
   }
 };

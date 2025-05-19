@@ -7,7 +7,7 @@ interface DashboardCardProps {
   value: string | number;
   icon: LucideIcon;
   trend?: number;
-  type: 'balance' | 'income' | 'expense';
+  type: 'balance' | 'income' | 'expense' | 'investment';
   className?: string;
 }
 
@@ -41,6 +41,13 @@ export const DashboardCard: React.FC<DashboardCardProps> = ({
           iconBg: 'bg-[#2B1C1C]',
           iconColor: 'text-red-400',
           valueColor: 'text-red-400'
+        };
+      case 'investment':
+        return {
+          bg: 'bg-dark-secondary',
+          iconBg: 'bg-[#1C1C2B]',
+          iconColor: 'text-blue-400',
+          valueColor: 'text-blue-400'
         };
     }
   };

@@ -26,12 +26,16 @@ export const FinancialHealthChart: React.FC<FinancialHealthChartProps> = ({ tran
 
     const income = filteredTransactions.reduce((acc, t) => 
       t.type === 'income' ? acc + t.amount : acc, 0);
-    const expenses = filteredTransactions.reduce((acc, t) => 
-      t.type === 'expense' ? acc + t.amount : acc, 0);
+    
+    // Consider both expenses and investments as outflows
+    const outflows = filteredTransactions.reduce((acc, t) => 
+      (t.type === 'expense' || t.type === 'investment') ? acc + t.amount : acc, 0);
 
-    if (income === 0) return 0;
+    if (income === 0) return -100; // If no income, return worst score
 
-    const ratio = (income - expenses) / income;
+    // Calculate the ratio between net income and total income
+    const netIncome = income - outflows;
+    const ratio = netIncome / Math.max(income, outflows);
     const score = ratio * 100;
 
     return Math.min(Math.max(score, -100), 100);
@@ -53,14 +57,14 @@ export const FinancialHealthChart: React.FC<FinancialHealthChartProps> = ({ tran
   };
 
   const getIndicatorColor = () => {
-    if (healthScore < 0) return '#EF4444';
-    if (healthScore < 50) return '#F97316';
+    if (healthScore < -30) return '#EF4444';
+    if (healthScore < 30) return '#F97316';
     return '#22C55E';
   };
 
   const getHealthStatus = () => {
-    if (healthScore < 0) return 'Crítico';
-    if (healthScore < 50) return 'Atenção';
+    if (healthScore < -30) return 'Crítico';
+    if (healthScore < 30) return 'Atenção';
     return 'Saudável';
   };
 
@@ -73,18 +77,21 @@ export const FinancialHealthChart: React.FC<FinancialHealthChartProps> = ({ tran
 
     const income = filteredTransactions.reduce((acc, t) => 
       t.type === 'income' ? acc + t.amount : acc, 0);
-    const expenses = filteredTransactions.reduce((acc, t) => 
-      t.type === 'expense' ? acc + t.amount : acc, 0);
+    
+    // Consider both expenses and investments as outflows
+    const outflows = filteredTransactions.reduce((acc, t) => 
+      (t.type === 'expense' || t.type === 'investment') ? acc + t.amount : acc, 0);
 
     if (income === 0) {
       return 'Nenhuma receita registrada neste mês';
     }
 
-    if (healthScore >= 0) {
-      const savingsPercent = ((income - expenses) / income * 100).toFixed(1);
+    const netIncome = income - outflows;
+    if (netIncome >= 0) {
+      const savingsPercent = ((netIncome) / income * 100).toFixed(1);
       return `Você está economizando ${savingsPercent}% da sua renda`;
     } else {
-      const overspendingPercent = ((expenses - income) / income * 100).toFixed(1);
+      const overspendingPercent = (Math.abs(netIncome) / income * 100).toFixed(1);
       return `Você está gastando ${overspendingPercent}% a mais que sua renda`;
     }
   };
