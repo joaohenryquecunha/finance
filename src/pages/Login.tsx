@@ -25,6 +25,7 @@ export const Login: React.FC = () => {
     const expired = searchParams.get('expired');
     if (expired === 'true') {
       setShowRenewalModal(true);
+      setError('Seu acesso expirou. Renove para continuar.');
     }
   }, [searchParams]); // Removido showRenewalModal para evitar loops
 
@@ -369,7 +370,13 @@ export const Login: React.FC = () => {
 
       {showRenewalModal && (
         <RenewalModal
-          onClose={() => setShowRenewalModal(false)}
+          onClose={() => {
+            setShowRenewalModal(false);
+            // Se está na rota ?expired=true, redireciona para /login sem query
+            if (window.location.search.includes('expired=true')) {
+              navigate('/login', { replace: true });
+            }
+          }}
           daysRemaining={0}
         />
       )}
