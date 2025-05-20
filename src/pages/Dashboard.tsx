@@ -94,14 +94,13 @@ export const Dashboard: React.FC = () => {
     }
   }, [getUserData]);
 
+  // Corrigir dependências do fetchCompanies
   const fetchCompanies = useCallback(async () => {
     if (!user?.uid) return;
-
     try {
       const companiesRef = collection(db, 'companies');
       const q = query(companiesRef, where('userId', '==', user.uid));
       const querySnapshot = await getDocs(q);
-      
       const companiesData = querySnapshot.docs.map(doc => {
         const data = doc.data();
         return {
@@ -112,18 +111,17 @@ export const Dashboard: React.FC = () => {
           createdAt: data.createdAt || new Date().toISOString()
         };
       });
-
       setCompanies(companiesData);
     } catch (error) {
       console.error('Erro ao buscar empresas:', error);
     }
-  }, [user]);
+  }, [user?.uid]); // Corrigido: depende apenas de user?.uid
 
   useEffect(() => {
     if (user?.uid) {
       fetchCompanies();
     }
-  }, [user, fetchCompanies]);
+  }, [user?.uid, fetchCompanies]); // Corrigido: depende apenas de user?.uid
 
   useEffect(() => {
     if (user && !user.isAdmin && !user.profile) {

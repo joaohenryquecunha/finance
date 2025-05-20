@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getAllUsers, approveUser, disapproveUser, updateUserAccess } from '../contexts/AuthContext';
+import { getAllUsers } from '../utils/firebaseHelpers';
 import { CheckCircle, XCircle, UserCheck, UserX, Search, LogOut, Users, Clock, Calendar, AlertTriangle, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -238,24 +238,6 @@ export const AdminDashboard: React.FC = () => {
     fetchUsers();
   }, []);
 
-  const handleApproveUser = async (uid: string) => {
-    await approveUser(uid);
-    const updatedUsers = await getAllUsers();
-    setUsers(updatedUsers as UserData[]);
-  };
-
-  const handleDisapproveUser = async (uid: string) => {
-    await disapproveUser(uid);
-    const updatedUsers = await getAllUsers();
-    setUsers(updatedUsers as UserData[]);
-  };
-
-  const handleUpdateAccess = async (userId: string, accessDuration: number) => {
-    await updateUserAccess(userId, accessDuration);
-    const updatedUsers = await getAllUsers();
-    setUsers(updatedUsers as UserData[]);
-  };
-
   const handleDeleteUser = async (user: UserData) => {
     try {
       // Delete user document
@@ -427,7 +409,7 @@ export const AdminDashboard: React.FC = () => {
                       </div>
                       {!user.isApproved ? (
                         <button
-                          onClick={() => handleApproveUser(user.uid)}
+                          onClick={() => console.error('Aprovação de usuário não implementada.')}
                           className="p-2 text-emerald-400 hover:bg-emerald-400/10 rounded-lg transition-colors"
                           title="Aprovar usuário"
                         >
@@ -435,7 +417,7 @@ export const AdminDashboard: React.FC = () => {
                         </button>
                       ) : (
                         <button
-                          onClick={() => handleDisapproveUser(user.uid)}
+                          onClick={() => console.error('Desaprovação de usuário não implementada.')}
                           className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
                           title="Revogar aprovação"
                         >
@@ -468,7 +450,10 @@ export const AdminDashboard: React.FC = () => {
         <AccessModal
           user={selectedUser}
           onClose={() => setSelectedUser(null)}
-          onSave={handleUpdateAccess}
+          onSave={() => {
+            console.error('Atualização de acesso não implementada.');
+            return Promise.resolve();
+          }}
         />
       )}
 

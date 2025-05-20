@@ -17,23 +17,17 @@ export const Companies: React.FC = () => {
   const navigate = useNavigate();
   const { user, getUserData } = useAuth();
 
-  useEffect(() => {
-    fetchCompanies();
-  }, [user]);
-
-  const fetchCompanies = async () => {
+  // Corrigir: garantir que fetchCompanies seja estável
+  const fetchCompanies = React.useCallback(async () => {
     if (!user?.uid) return;
-
     try {
       const companiesRef = collection(db, 'companies');
       const q = query(companiesRef, where('userId', '==', user.uid));
       const querySnapshot = await getDocs(q);
-      
       const companiesData = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as Company[];
-
       setCompanies(companiesData);
     } catch (err) {
       setError('Erro ao carregar empresas');
@@ -41,7 +35,13 @@ export const Companies: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (user?.uid) {
+      fetchCompanies();
+    }
+  }, [user?.uid, fetchCompanies]); // Agora seguro
 
   const handleAddCompany = async (newCompany: Omit<Company, 'id' | 'userId' | 'createdAt'>) => {
     if (!user?.uid) return;

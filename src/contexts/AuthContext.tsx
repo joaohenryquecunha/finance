@@ -21,6 +21,7 @@ import {
 import { auth, db } from '../lib/firebase';
 import { Transaction, Category, UserProfile } from '../types';
 import { useNavigate } from 'react-router-dom';
+import { removeUndefinedValues } from '../utils/firebaseHelpers';
 
 interface User {
   uid: string;
@@ -62,23 +63,6 @@ const ADMIN_CREDENTIALS = {
 const USER_STORAGE_KEY = 'jf_user';
 const USER_DATA_STORAGE_KEY = 'jf_user_data';
 
-// Helper function to remove undefined values from an object
-const removeUndefinedValues = (obj: Record<string, any>): Record<string, any> => {
-  const cleanObj = { ...obj };
-  Object.keys(cleanObj).forEach(key => {
-    if (cleanObj[key] === undefined) {
-      delete cleanObj[key];
-    } else if (Array.isArray(cleanObj[key])) {
-      cleanObj[key] = cleanObj[key].map((item: any) => 
-        typeof item === 'object' && item !== null ? removeUndefinedValues(item) : item
-      );
-    } else if (typeof cleanObj[key] === 'object' && cleanObj[key] !== null) {
-      cleanObj[key] = removeUndefinedValues(cleanObj[key]);
-    }
-  });
-  return cleanObj;
-};
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
     const storedUser = localStorage.getItem(USER_STORAGE_KEY);
@@ -116,27 +100,91 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const userData = docSnap.data();
-        if (
-          user.accessDuration !== userData.accessDuration ||
-          user.isApproved !== userData.isApproved
-        ) {
+        setUser((prevUser) => {
+          if (!prevUser) return prevUser;
           const updatedUser = {
-            ...user,
+            ...prevUser,
             accessDuration: userData.accessDuration,
             isApproved: userData.isApproved
           };
-          setUser(updatedUser);
-
-          // If accessDuration changed, redirect to success page
-          if (userData.accessDuration !== user.accessDuration) {
+          if (userData.accessDuration !== prevUser.accessDuration) {
             navigate(`/dashboard?payment_success=true&access_duration=${userData.accessDuration}`);
           }
-        }
+          return updatedUser;
+        });
       }
     });
 
     return () => unsubscribe();
-  }, [user, navigate]);
+  }, [user?.uid, user?.isAdmin, navigate]); // Corrigido: depende apenas de uid/isAdmin/navigate
+
+  // Effect to sync with Firestore Auth
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser && !user?.isAdmin) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            
+            // Check if access has expired
+            if (!userData.isAdmin && (!userData.accessDuration || !userData.createdAt)) {
+              await firebaseSignOut(auth);
+              setUser(null);
+              setUserData(null);
+              navigate('/login?expired=true');
+              return;
+            }
+
+            // Check if elapsed time exceeds duration
+            if (!userData.isAdmin && userData.accessDuration && userData.createdAt) {
+              const startTime = new Date(userData.createdAt).getTime();
+              const now = new Date().getTime();
+              const elapsedSeconds = Math.floor((now - startTime) / 1000);
+              
+              if (elapsedSeconds >= userData.accessDuration && !userData.isApproved) {
+                await firebaseSignOut(auth);
+                setUser(null);
+                setUserData(null);
+                navigate('/login?expired=true');
+                return;
+              }
+            }
+
+            const newUser = {
+              uid: firebaseUser.uid,
+              username: userData.username,
+              isAdmin: userData.isAdmin || false,
+              isApproved: userData.isApproved || false,
+              accessDuration: userData.accessDuration,
+              createdAt: userData.createdAt,
+              profile: userData.profile
+            };
+            setUser(newUser);
+
+            // Set up real-time listener for user data
+            const userDataRef = doc(db, 'userData', firebaseUser.uid);
+            const unsubscribeUserData = onSnapshot(userDataRef, (snapshot) => {
+              if (snapshot.exists()) {
+                const data = snapshot.data() as UserData;
+                setUserData(data);
+                localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(data));
+              }
+            });
+
+            // Limpa o listener ao deslogar
+            return () => unsubscribeUserData();
+          }
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+          await firebaseSignOut(auth);
+          setUser(null);
+          setUserData(null);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [user?.isAdmin, navigate]); // Corrigido: depende apenas de isAdmin/navigate
 
   // --- Funções signOut e checkAccessExpiration ---
   const checkAccessExpiration = () => {
@@ -225,7 +273,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             // Set up real-time listener for user data
             const userDataRef = doc(db, 'userData', firebaseUser.uid);
-            const unsubscribeUserData = onSnapshot(userDataRef, (snapshot) => {
+            onSnapshot(userDataRef, (snapshot) => {
               if (snapshot.exists()) {
                 const data = snapshot.data() as UserData;
                 setUserData(data);
@@ -233,7 +281,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             });
 
-            return () => unsubscribeUserData();
           }
         } catch (error) {
           console.error('Error fetching user data:', error);
@@ -246,6 +293,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => unsubscribe();
   }, [user, navigate]);
+
+  // Corrigir dependências e evitar fetch redundante
+  useEffect(() => {
+    if (!user?.uid || user.isAdmin) return;
+
+    const cachedUserData = localStorage.getItem(USER_DATA_STORAGE_KEY);
+    if (cachedUserData) {
+      setUserData(JSON.parse(cachedUserData));
+      return;
+    }
+
+    let isMounted = true;
+    const fetchUserData = async () => {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists() && isMounted) {
+          const userData = userDocSnap.data() as UserData;
+          setUserData(userData);
+          localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(userData));
+        }
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          console.error('Erro ao buscar dados do usuário:', error.message);
+        } else {
+          console.error('Erro desconhecido ao buscar dados do usuário:', error);
+        }
+      }
+    };
+    fetchUserData();
+    return () => { isMounted = false; };
+  }, [user?.uid, user?.isAdmin]); // Corrigido: depende apenas de uid/isAdmin
 
   const signIn = async (username: string, password: string, isAdminLogin?: boolean) => {
     try {
@@ -311,7 +390,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Set up real-time listener for user data
       const userDataRef = doc(db, 'userData', userCredential.user.uid);
-      const unsubscribe = onSnapshot(userDataRef, (snapshot) => {
+      onSnapshot(userDataRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data() as UserData;
           setUserData(data);
@@ -319,15 +398,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error in signIn:', error);
-      if (error.code === 'auth/too-many-requests') {
-        throw new Error('Muitas tentativas de login. Por favor, aguarde alguns minutos e tente novamente.');
+      if (error instanceof Error) {
+        if (error.message.includes('too many requests')) {
+          throw new Error('Muitas tentativas de login. Por favor, aguarde alguns minutos e tente novamente.');
+        }
+        if (error.message.includes('invalid-credential') || error.message.includes('invalid-email')) {
+          throw new Error('Usuário ou senha inválidos');
+        }
+        throw error;
+      } else {
+        throw new Error('Erro desconhecido ao fazer login');
       }
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-email') {
-        throw new Error('Usuário ou senha inválidos');
-      }
-      throw error;
     }
   };
 
@@ -359,12 +442,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const initialUserData = { transactions: [], categories: [] };
       await setDoc(doc(db, 'userData', userCredential.user.uid), initialUserData);
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error in signUp:', error);
-      if (error.code === 'auth/email-already-in-use') {
-        throw new Error('Nome de usuário já está em uso');
+      if (error instanceof Error) {
+        if (error.message.includes('email-already-in-use')) {
+          throw new Error('Nome de usuário já está em uso');
+        }
+        throw error;
+      } else {
+        throw new Error('Erro desconhecido ao cadastrar usuário');
       }
-      throw error;
     }
   };
 
@@ -377,12 +464,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ...data
       };
 
-      // Remove any undefined values from the data
+      // Remove valores indefinidos usando a função auxiliar
       const cleanData = removeUndefinedValues(updatedData);
 
       if (!user.isAdmin) {
         const userDataRef = doc(db, 'userData', user.uid);
-        await updateDoc(userDataRef, cleanData);
+        await updateDoc(userDataRef, cleanData as Partial<UserData>);
       }
       
       setUserData(cleanData as UserData);
@@ -455,12 +542,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Update password
       await updatePassword(firebaseUser, newPassword);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error updating password:', error);
-      if (error.code === 'auth/wrong-password') {
-        throw new Error('Senha atual incorreta');
+      if (error instanceof Error) {
+        if (error.message.includes('wrong-password')) {
+          throw new Error('Senha atual incorreta');
+        }
+        throw new Error('Erro ao atualizar senha');
+      } else {
+        throw new Error('Erro desconhecido ao atualizar senha');
       }
-      throw new Error('Erro ao atualizar senha');
     }
   };
 
@@ -490,53 +581,4 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-};
-
-export const getAllUsers = async () => {
-  try {
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef);
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
-      uid: doc.id,
-      ...doc.data()
-    }));
-  } catch (error) {
-    console.error('Error getting users:', error);
-    throw error;
-  }
-};
-
-export const approveUser = async (uid: string) => {
-  try {
-    await updateDoc(doc(db, 'users', uid), {
-      isApproved: true
-    });
-  } catch (error) {
-    console.error('Error approving user:', error);
-    throw error;
-  }
-};
-
-export const disapproveUser = async (uid: string) => {
-  try {
-    await updateDoc(doc(db, 'users', uid), {
-      isApproved: false
-    });
-  } catch (error) {
-    console.error('Error disapproving user:', error);
-    throw error;
-  }
-};
-
-export const updateUserAccess = async (uid: string, accessDuration: number) => {
-  try {
-    await updateDoc(doc(db, 'users', uid), {
-      accessDuration,
-      createdAt: new Date().toISOString() // Reset the start time when updating access duration
-    });
-  } catch (error) {
-    console.error('Error updating user access:', error);
-    throw error;
-  }
 };

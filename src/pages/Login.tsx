@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Wallet, Settings, Loader2, UserPlus, LogIn } from 'lucide-react';
-import { UserProfileModal } from '../components/UserProfileModal';
 import { RenewalModal } from '../components/RenewalModal';
 
 export const Login: React.FC = () => {
@@ -17,9 +16,8 @@ export const Login: React.FC = () => {
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showWhatsApp, setShowWhatsApp] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showRenewalModal, setShowRenewalModal] = useState(false);
-  const { signIn, signUp, updateUserProfile } = useAuth();
+  const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -28,7 +26,7 @@ export const Login: React.FC = () => {
     if (expired === 'true') {
       setShowRenewalModal(true);
     }
-  }, [searchParams]);
+  }, [searchParams]); // Removido showRenewalModal para evitar loops
 
   // Effect to handle WhatsApp button animation
   useEffect(() => {
@@ -37,7 +35,7 @@ export const Login: React.FC = () => {
     }, 3000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, []); // Garantir que o timer seja configurado apenas uma vez
 
   const formatCPF = (value: string) => {
     return value
@@ -145,25 +143,14 @@ export const Login: React.FC = () => {
     }
   };
 
-  const handleProfileSubmit = async (data: { cpf: string; phone: string }) => {
-    try {
-      await updateUserProfile(data);
-      navigate('/dashboard');
-    } catch (error) {
-      throw error;
-    }
-  };
-
-  const switchMode = () => {
-    setIsRegistering(!isRegistering);
-    setError('');
-    setSuccess('');
-    setUsername('');
-    setPassword('');
-    setConfirmPassword('');
-    setCpf('');
-    setPhone('');
-  };
+  // Adicionando fallback para evitar tela branca
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="animate-spin text-gold-primary" size={48} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-dark-primary flex items-center justify-center p-4">
@@ -379,10 +366,6 @@ export const Login: React.FC = () => {
           <Settings size={20} />
         </button>
       </div>
-
-      {showProfileModal && (
-        <UserProfileModal onSubmit={handleProfileSubmit} />
-      )}
 
       {showRenewalModal && (
         <RenewalModal
