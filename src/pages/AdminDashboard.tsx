@@ -3,7 +3,7 @@ import { getAllUsers } from '../utils/firebaseHelpers';
 import { CheckCircle, XCircle, UserCheck, UserX, Search, LogOut, Users, Clock, Calendar, AlertTriangle, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { getDiasRestantes } from '../utils/access';
+import { getDiasRestantes, formatTempoRestante } from '../utils/access';
 import { parseISO, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { doc, deleteDoc, updateDoc } from 'firebase/firestore';
@@ -281,11 +281,14 @@ export const AdminDashboard: React.FC = () => {
     return getDiasRestantes(user.accessDuration, user.createdAt) > 0;
   }).length;
 
+  // getAccessStatus agora usa formatTempoRestante para exibir tempo detalhado
   const getAccessStatus = (user: UserData) => {
     if (user.isAdmin) return { text: 'Acesso permanente', color: 'text-emerald-400' };
     const diasRestantes = getDiasRestantes(user.accessDuration, user.createdAt);
     if (diasRestantes === 0) return { text: 'Expirado', color: 'text-red-400' };
-    return { text: `${diasRestantes} ${diasRestantes === 1 ? 'dia' : 'dias'} de acesso`, color: 'text-emerald-400' };
+    // Exibe formato detalhado igual à dashboard
+    const tempoRestante = formatTempoRestante(user.accessDuration, user.createdAt);
+    return { text: tempoRestante, color: 'text-emerald-400' };
   };
 
   const getAccountAge = (createdAt?: string) => {

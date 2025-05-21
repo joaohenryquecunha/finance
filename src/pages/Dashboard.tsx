@@ -195,51 +195,66 @@ export const Dashboard: React.FC = () => {
     return Math.round(((currentAmount - previousAmount) / previousAmount) * 100);
   };
 
-  const filteredTransactions = getFilteredTransactions(selectedDate, selectedMonth);
+  // income, expenses e investments precisam ser recalculados sempre que filteredTransactions mudar
+  const dateRange = getDateRange(selectedDate, dateFilter);
 
-  const calculateBalance = () => {
-    return filteredTransactions.reduce((acc, transaction)  => {
-      return transaction.type === 'income'
-        ? acc + transaction.amount
-        : acc - transaction.amount;
-    }, 0);
-  };
+  // Substituir filteredTransactions por filteredTransactionsByRange para os cards principais
+  const filteredTransactionsByRange = transactions.filter(transaction => {
+    const transactionDate = utcToZonedTime(parseISO(transaction.date), TIMEZONE);
+    const startDate = utcToZonedTime(dateRange.start, TIMEZONE);
+    const endDate = utcToZonedTime(dateRange.end, TIMEZONE);
+    return isWithinInterval(transactionDate, { start: startDate, end: endDate });
+  });
 
-  const calculateTotalIncome = () => {
-    const total = filteredTransactions.reduce((acc, transaction) => {
-      return transaction.type === 'income'
-        ? acc + transaction.amount
-        : acc;
-    }, 0);
-    return {
-      amount: total,
-      trend: calculateTrend(total, 'income')
-    };
-  };
+  const [cardsData, setCardsData] = useState({
+    balance: 0,
+    income: { amount: 0, trend: 0 },
+    expenses: { amount: 0, trend: 0 },
+    investments: { amount: 0, trend: 0 }
+  });
 
-  const calculateTotalExpenses = () => {
-    const total = filteredTransactions.reduce((acc, transaction) => {
-      return transaction.type === 'expense'
-        ? acc + transaction.amount
-        : acc;
-    }, 0);
-    return {
-      amount: total,
-      trend: calculateTrend(total, 'expense')
-    };
-  };
-
-  const calculateTotalInvestments = () => {
-    const total = filteredTransactions.reduce((acc, transaction) => {
-      return transaction.type === 'investment'
-        ? acc + transaction.amount
-        : acc;
-    }, 0);
-    return {
-      amount: total,
-      trend: calculateTrend(total, 'investment')
-    };
-  };
+  useEffect(() => {
+    setCardsData({
+      balance: filteredTransactionsByRange.reduce((acc, transaction)  => {
+        return transaction.type === 'income'
+          ? acc + transaction.amount
+          : acc - transaction.amount;
+      }, 0),
+      income: (() => {
+        const total = filteredTransactionsByRange.reduce((acc, transaction) => {
+          return transaction.type === 'income'
+            ? acc + transaction.amount
+            : acc;
+        }, 0);
+        return {
+          amount: total,
+          trend: calculateTrend(total, 'income')
+        };
+      })(),
+      expenses: (() => {
+        const total = filteredTransactionsByRange.reduce((acc, transaction) => {
+          return transaction.type === 'expense'
+            ? acc + transaction.amount
+            : acc;
+        }, 0);
+        return {
+          amount: total,
+          trend: calculateTrend(total, 'expense')
+        };
+      })(),
+      investments: (() => {
+        const total = filteredTransactionsByRange.reduce((acc, transaction) => {
+          return transaction.type === 'investment'
+            ? acc + transaction.amount
+            : acc;
+        }, 0);
+        return {
+          amount: total,
+          trend: calculateTrend(total, 'investment')
+        };
+      })()
+    });
+  }, [filteredTransactionsByRange, calculateTrend]);
 
   const handleAddTransaction = async (newTransaction: Omit<Transaction, 'id'>) => {
     const transaction: Transaction = {
@@ -318,12 +333,6 @@ export const Dashboard: React.FC = () => {
     if (!user?.accessDuration || !user?.createdAt) return 0;
     return getDiasRestantes(user.accessDuration, user.createdAt);
   };
-
-  const dateRange = getDateRange(selectedDate, dateFilter);
-
-  const income = calculateTotalIncome();
-  const expenses = calculateTotalExpenses();
-  const investments = calculateTotalInvestments();
 
   // Atualizar selectedDate ao mudar selectedMonth
   useEffect(() => {
@@ -582,30 +591,30 @@ export const Dashboard: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <DashboardCard
             title="Saldo Total"
-            value={calculateBalance()}
+            value={cardsData.balance}
             icon={Wallet}
             type="balance"
           />
           <DashboardCard
             title="Receitas"
-            value={income.amount}
+            value={cardsData.income.amount}
             icon={TrendingUp}
             type="income"
-            trend={income.trend}
+            trend={cardsData.income.trend}
           />
           <DashboardCard
             title="Despesas"
-            value={expenses.amount}
+            value={cardsData.expenses.amount}
             icon={TrendingDown}
             type="expense"
-            trend={expenses.trend}
+            trend={cardsData.expenses.trend}
           />
           <DashboardCard
             title="Investimentos"
-            value={investments.amount}
+            value={cardsData.investments.amount}
             icon={Landmark}
             type="investment"
-            trend={investments.trend}
+            trend={cardsData.investments.trend}
           />
         </div>
 
