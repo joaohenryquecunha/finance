@@ -302,6 +302,23 @@ export const Dashboard: React.FC = () => {
     await updateUserData({ categories: updatedCategories });
   };
 
+  // Adiciona função para editar categoria
+  const handleEditCategory = async (categoryId: string, updated: { name: string; color: string }) => {
+    // Atualiza a lista de categorias
+    const oldCategory = categories.find(cat => cat.id === categoryId);
+    if (!oldCategory) return;
+    const updatedCategories = categories.map(cat =>
+      cat.id === categoryId ? { ...cat, ...updated } : cat
+    );
+    // Atualiza todas as transações que usam o nome antigo da categoria
+    const updatedTransactions = transactions.map(tx =>
+      tx.category === oldCategory.name ? { ...tx, category: updated.name } : tx
+    );
+    setCategories(updatedCategories);
+    setTransactions(updatedTransactions);
+    await updateUserData({ categories: updatedCategories, transactions: updatedTransactions });
+  };
+
   const handleUpdateUsername = async (newUsername: string) => {
     try {
       await updateUsername(newUsername);
@@ -649,6 +666,7 @@ export const Dashboard: React.FC = () => {
             categories={categories}
             onAddCategory={handleAddCategory}
             onDeleteCategory={handleDeleteCategory}
+            onEditCategory={handleEditCategory}
             onClose={() => setShowCategoryManager(false)}
           />
         )}
