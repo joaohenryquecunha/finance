@@ -27,7 +27,7 @@ export const getAllUsers = async () => {
     const data = doc.data();
     return {
       id: doc.id,
-      uid: data.uid || '',
+      uid: doc.id, // Sempre usa o id do documento como uid
       username: data.username || '',
       isAdmin: data.isAdmin || false,
       isApproved: data.isApproved || false,

@@ -3,10 +3,10 @@ import { getAllUsers } from '../utils/firebaseHelpers';
 import { CheckCircle, XCircle, UserCheck, UserX, Search, LogOut, Users, Clock, Calendar, AlertTriangle, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { getDiasRestantes } from '../utils/access';
-import { parseISO, addDays, formatDistanceToNow } from 'date-fns';
+import { getDiasRestantes, formatTempoRestante } from '../utils/access';
+import { parseISO, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { doc, deleteDoc } from 'firebase/firestore';
+import { doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 interface UserData {
@@ -104,20 +104,30 @@ const AccessModal: React.FC<AccessModalProps> = ({ user, onClose, onSave }) => {
     try {
       setIsLoading(true);
       const daysNumber = parseInt(days);
-      
-      // Calculate new duration based on operation
       let newDuration = user.accessDuration || 0;
+      let newCreatedAt = user.createdAt ? new Date(user.createdAt) : new Date();
+      const agora = new Date();
+      const expirado = getDiasRestantes(user.accessDuration, user.createdAt) === 0;
+
       if (operation === 'add') {
-        newDuration += (daysNumber * 24 * 60 * 60); // Convert days to seconds
+        newDuration += (daysNumber * 24 * 60 * 60);
+        // Se estava expirado, reinicia o createdAt para agora
+        if (expirado) {
+          newCreatedAt = agora;
+        }
       } else {
         newDuration = Math.max(0, newDuration - (daysNumber * 24 * 60 * 60));
+        // Se remover tudo, createdAt não importa mais
+        if (newDuration === 0) {
+          newCreatedAt = user.createdAt ? new Date(user.createdAt) : agora;
+        }
       }
 
-      // Calculate new expiration date
-      const startDate = user.createdAt ? new Date(user.createdAt) : new Date();
-      const expirationDate = addDays(startDate, Math.floor(newDuration / (24 * 60 * 60))).toISOString();
-
-      await onSave(user.uid, newDuration, expirationDate);
+      await onSave(
+        user.uid,
+        newDuration,
+        newCreatedAt.toISOString() // createdAt atualizado
+      );
       onClose();
     } catch (error) {
       console.error('Error updating access:', error);
@@ -234,6 +244,8 @@ export const AdminDashboard: React.FC = () => {
     const fetchUsers = async () => {
       const fetchedUsers = await getAllUsers();
       setUsers(fetchedUsers as UserData[]);
+      // Salva no localStorage para referência futura
+      localStorage.setItem('admin_users', JSON.stringify(fetchedUsers));
     };
     fetchUsers();
   }, []);
@@ -258,9 +270,7 @@ export const AdminDashboard: React.FC = () => {
     navigate('/login');
   };
 
-  const filteredUsers = users.filter(user => 
-    user.username.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredUsers = users.filter(user => user.username.toLowerCase().includes(searchTerm.toLowerCase()));
 
   // Calculate user statistics
   const totalUsers = users.length;
@@ -271,11 +281,14 @@ export const AdminDashboard: React.FC = () => {
     return getDiasRestantes(user.accessDuration, user.createdAt) > 0;
   }).length;
 
+  // getAccessStatus agora usa formatTempoRestante para exibir tempo detalhado
   const getAccessStatus = (user: UserData) => {
     if (user.isAdmin) return { text: 'Acesso permanente', color: 'text-emerald-400' };
     const diasRestantes = getDiasRestantes(user.accessDuration, user.createdAt);
     if (diasRestantes === 0) return { text: 'Expirado', color: 'text-red-400' };
-    return { text: `${diasRestantes} ${diasRestantes === 1 ? 'dia' : 'dias'} de acesso`, color: 'text-emerald-400' };
+    // Exibe formato detalhado igual à dashboard
+    const tempoRestante = formatTempoRestante(user.accessDuration, user.createdAt);
+    return { text: tempoRestante, color: 'text-emerald-400' };
   };
 
   const getAccountAge = (createdAt?: string) => {
@@ -348,7 +361,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           <div className="space-y-4">
-            {filteredUsers.map((user) => (
+            {filteredUsers.map(user => (
               <div
                 key={user.uid}
                 className="bg-dark-tertiary rounded-lg p-4"
@@ -450,9 +463,26 @@ export const AdminDashboard: React.FC = () => {
         <AccessModal
           user={selectedUser}
           onClose={() => setSelectedUser(null)}
-          onSave={() => {
-            console.error('Atualização de acesso não implementada.');
-            return Promise.resolve();
+          onSave={async (userId, newDuration, expirationDate) => {
+            // Busca o uid correto no localStorage pelo username
+            const usersLS: UserData[] = JSON.parse(localStorage.getItem('admin_users') || '[]');
+            const userLS = usersLS.find(u => u.username === selectedUser.username);
+            const uidToUse = userLS?.uid || userId;
+            if (!uidToUse) {
+              console.error('ID do usuário não definido ao tentar atualizar acesso.');
+              return;
+            }
+            const userRef = doc(db, 'users', uidToUse);
+            await updateDoc(userRef, {
+              accessDuration: newDuration,
+              createdAt: expirationDate,
+              isApproved: newDuration > 0
+            });
+            setUsers(prev => prev.map(u =>
+              u.uid === uidToUse
+                ? { ...u, accessDuration: newDuration, createdAt: expirationDate, isApproved: newDuration > 0 }
+                : u
+            ));
           }}
         />
       )}

@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 
 const firebaseConfig = { 
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -47,3 +47,14 @@ export const setupAdminUser = async () => {
     console.error('Error in setupAdminUser:', error);
   }
 };
+
+// Função utilitária para ser chamada após pagamento confirmado
+export async function liberarAcessoUsuario(uid: string, dias: number) {
+  const userRef = doc(db, 'users', uid);
+  const accessDuration = dias * 24 * 60 * 60;
+  await updateDoc(userRef, {
+    accessDuration,
+    isApproved: false, // ou true se quiser liberar imediatamente
+    createdAt: new Date().toISOString()
+  });
+}

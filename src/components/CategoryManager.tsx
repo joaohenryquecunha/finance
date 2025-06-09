@@ -6,6 +6,7 @@ interface CategoryManagerProps {
   categories: Category[];
   onAddCategory: (category: Omit<Category, 'id'>) => void;
   onDeleteCategory: (categoryId: string) => void;
+  onEditCategory: (categoryId: string, updated: { name: string; color: string }) => void;
   onClose: () => void;
 }
 
@@ -13,9 +14,12 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
   categories,
   onAddCategory,
   onDeleteCategory,
+  onEditCategory,
   onClose
 }) => {
   const [newCategory, setNewCategory] = useState({ name: '', color: '#FFD700' });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<{ name: string; color: string }>({ name: '', color: '#FFD700' });
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -84,22 +88,64 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
                 key={category.id}
                 className="flex items-center justify-between p-4 rounded-lg hover:bg-dark-tertiary transition-colors"
               >
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-6 h-6 rounded-full"
-                    style={{ backgroundColor: category.color }}
-                  />
-                  <span className="font-medium text-gray-200 text-base">{category.name}</span>
+                {editingId === category.id ? (
+                  <form
+                    className="flex items-center gap-3 flex-1"
+                    onSubmit={e => {
+                      e.preventDefault();
+                      localStorage.setItem(`category_color_${editValues.name}`, editValues.color);
+                      onEditCategory(category.id, editValues);
+                      setEditingId(null);
+                    }}
+                  >
+                    <input
+                      type="text"
+                      value={editValues.name}
+                      onChange={e => setEditValues(v => ({ ...v, name: e.target.value }))}
+                      className="w-32 rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 text-base"
+                      required
+                    />
+                    <input
+                      type="color"
+                      value={editValues.color}
+                      onChange={e => setEditValues(v => ({ ...v, color: e.target.value }))}
+                      className="w-8 h-8 rounded-lg bg-dark-tertiary border-dark-tertiary p-1 cursor-pointer"
+                    />
+                    <button type="submit" className="bg-gold-primary text-dark-primary px-3 py-1 rounded-lg hover:bg-gold-hover transition-colors text-sm font-semibold">Salvar</button>
+                    <button type="button" onClick={() => setEditingId(null)} className="ml-1 text-gray-400 hover:text-red-400 text-sm">Cancelar</button>
+                  </form>
+                ) : (
+                  <div className="flex items-center gap-3 flex-1">
+                    <div
+                      className="w-6 h-6 rounded-full"
+                      style={{ backgroundColor: category.color }}
+                    />
+                    <span className="font-medium text-gray-200 text-base">{category.name}</span>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  {editingId !== category.id && (
+                    <button
+                      onClick={() => {
+                        setEditingId(category.id);
+                        setEditValues({ name: category.name, color: category.color });
+                      }}
+                      className="text-gold-primary hover:text-gold-hover p-2 rounded-lg"
+                      title="Editar categoria"
+                    >
+                      <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.65 4.35l3 3a1 1 0 0 1 0 1.41l-7.29 7.29a1 1 0 0 1-.7.29H5a1 1 0 0 1-1-1v-2.17a1 1 0 0 1 .29-.7l7.29-7.29a1 1 0 0 1 1.41 0z"/><path d="M15 6l-3-3"/></svg>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem(`category_color_${category.name}`);
+                      onDeleteCategory(category.id);
+                    }}
+                    className="text-red-400 hover:text-red-300 p-2 rounded-lg"
+                  >
+                    <Trash2 size={20} />
+                  </button>
                 </div>
-                <button
-                  onClick={() => {
-                    localStorage.removeItem(`category_color_${category.name}`);
-                    onDeleteCategory(category.id);
-                  }}
-                  className="text-red-400 hover:text-red-300 p-2 rounded-lg"
-                >
-                  <Trash2 size={20} />
-                </button>
               </div>
             ))}
           </div>
