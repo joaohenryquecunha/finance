@@ -22,6 +22,7 @@ import { auth, db } from '../lib/firebase';
 import { Transaction, Category, UserProfile } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { removeUndefinedValues } from '../utils/firebaseHelpers';
+import axios from 'axios';
 
 interface User {
   uid: string;
@@ -62,6 +63,10 @@ const ADMIN_CREDENTIALS = {
 // Storage keys
 const USER_STORAGE_KEY = 'jf_user';
 const USER_DATA_STORAGE_KEY = 'jf_user_data';
+
+// IDs do formulário externo (preencha com os valores reais do seu formulário)
+const TENANT_ID = '10507';
+const FORM_ID = '2';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
@@ -441,6 +446,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const initialUserData = { transactions: [], categories: [] };
       await setDoc(doc(db, 'userData', userCredential.user.uid), initialUserData);
+
+      // Integração com formulário externo via axios e FormData
+      try {
+        const formData = new FormData();
+        formData.append('tenant_id', TENANT_ID);
+        formData.append('form_id', FORM_ID);
+        formData.append('nome', username);
+        formData.append('cpf', profile.cpf);
+        formData.append('telefone', profile.phone);
+        formData.append('email', email); // opcional
+        await axios.post('https://back.gdigital.com.br/form/register', formData);
+      } catch (err) {
+        // Não impede o cadastro local, apenas loga o erro
+        console.error('Erro ao enviar dados para o formulário externo:', err);
+      }
 
     } catch (error: unknown) {
       console.error('Error in signUp:', error);
