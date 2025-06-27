@@ -35,6 +35,7 @@ export interface Goal {
 export interface UserProfile {
   cpf: string;
   phone: string;
+  email: string;
 }
 
 export interface User {

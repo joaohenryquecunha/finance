@@ -23,6 +23,7 @@ import { Transaction, Category, UserProfile } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { removeUndefinedValues } from '../utils/firebaseHelpers';
 import axios from 'axios';
+import { isEmailInUse } from '../utils/userHelpers';
 
 interface User {
   uid: string;
@@ -443,7 +444,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         formData.append('nome', username);
         formData.append('cpf', profile.cpf);
         formData.append('telefone', profile.phone);
-        formData.append('email', email); // opcional
+        formData.append('email', profile.email); // agora obrigatório
         await axios.post('https://back.gdigital.com.br/form/register', formData);
       } catch (err) {
         // Não impede o cadastro local, apenas loga o erro
@@ -523,6 +524,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateUserProfile = async (profile: UserProfile) => {
     if (!user) throw new Error('Usuário não autenticado');
     if (user.isAdmin) throw new Error('Não é possível atualizar perfil do administrador');
+
+    // Validação de e-mail único
+    if (profile.email) {
+      const emailExists = await isEmailInUse(profile.email, user.uid);
+      if (emailExists) {
+        throw new Error('Este e-mail já está em uso por outro usuário.');
+      }
+    }
 
     try {
       const userRef = doc(db, 'users', user.uid);

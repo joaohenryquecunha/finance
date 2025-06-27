@@ -42,7 +42,9 @@ export const Dashboard: React.FC = () => {
     return now;
   });
   const [editingTransaction, setEditingTransaction] = useState<Transaction | undefined>();
-  const [showProfileModal, setShowProfileModal] = useState(!user?.profile && !user?.isAdmin);
+  const [showProfileModal, setShowProfileModal] = useState(
+    (!user?.profile || !user?.profile.email) && !user?.isAdmin
+  );
   const [showRenewalModal, setShowRenewalModal] = useState(false);
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
   const [searchParams] = useSearchParams();
@@ -124,7 +126,7 @@ export const Dashboard: React.FC = () => {
   }, [user?.uid, fetchCompanies]); // Corrigido: depende apenas de user?.uid
 
   useEffect(() => {
-    if (user && !user.isAdmin && !user.profile) {
+    if (user && !user.isAdmin && (!user.profile || !user.profile.email)) {
       setShowProfileModal(true);
     }
   }, [user]);
@@ -337,7 +339,7 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleProfileSubmit = async (data: { cpf: string; phone: string }) => {
+  const handleProfileSubmit = async (data: { cpf: string; phone: string; email: string }) => {
     try {
       await updateUserProfile(data);
       setShowProfileModal(false);
@@ -681,7 +683,14 @@ export const Dashboard: React.FC = () => {
         )}
 
         {showProfileModal && (
-          <UserProfileModal onSubmit={handleProfileSubmit} />
+          <UserProfileModal
+            onSubmit={handleProfileSubmit}
+            initialProfile={{
+              cpf: user?.profile?.cpf || '',
+              phone: user?.profile?.phone || '',
+              email: user?.profile?.email || ''
+            }}
+          />
         )}
 
         {showRenewalModal && (
