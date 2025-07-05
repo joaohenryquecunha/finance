@@ -7,6 +7,7 @@ import { CompanyTransactionChart } from '../components/CompanyTransactionChart';
 import { useAuth } from '../contexts/AuthContext';
 import { collection, query, where, getDocs, addDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, parseISO, isWithinInterval } from 'date-fns';
 
 export const Companies: React.FC = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -89,10 +90,37 @@ export const Companies: React.FC = () => {
     }
   };
 
+  // Filtros de data
+  type DateFilter = 'day' | 'month' | 'year';
+  const [dateFilter, setDateFilter] = useState<DateFilter>('month');
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  });
+
+  // Função para obter range de datas
+  const getDateRange = (date: Date, filter: DateFilter) => {
+    switch (filter) {
+      case 'day':
+        return { start: startOfDay(date), end: endOfDay(date) };
+      case 'month':
+        return { start: startOfMonth(date), end: endOfMonth(date) };
+      case 'year':
+        return { start: startOfYear(date), end: endOfYear(date) };
+    }
+  };
+
+  // Função para filtrar transações da empresa pelo filtro de data
   const getCompanyTransactions = (companyId: string): Transaction[] => {
     const userData = getUserData();
     if (!userData) return [];
-    return userData.transactions.filter(t => t.companyId === companyId);
+    const range = getDateRange(selectedDate, dateFilter);
+    return userData.transactions.filter(t => {
+      if (t.companyId !== companyId) return false;
+      const transactionDate = parseISO(t.date);
+      return isWithinInterval(transactionDate, { start: range.start, end: range.end });
+    });
   };
 
   if (isLoading) {
@@ -148,6 +176,44 @@ export const Companies: React.FC = () => {
               <Plus size={20} />
             </button>
           </div>
+        </div>
+
+        {/* Filtros de data */}
+        <div className="flex flex-wrap gap-2 mb-4 items-center">
+          <label className="text-gray-300 font-medium">Filtrar por:</label>
+          <select
+            value={dateFilter}
+            onChange={e => setDateFilter(e.target.value as DateFilter)}
+            className="bg-dark-tertiary text-gray-200 rounded-lg px-3 py-2 border-none focus:ring-2 focus:ring-gold-primary"
+          >
+            <option value="day">Dia</option>
+            <option value="month">Mês</option>
+            <option value="year">Ano</option>
+          </select>
+          <input
+            type={dateFilter === 'day' ? 'date' : dateFilter === 'month' ? 'month' : 'number'}
+            value={
+              dateFilter === 'day'
+                ? selectedDate.toISOString().slice(0, 10)
+                : dateFilter === 'month'
+                ? selectedDate.toISOString().slice(0, 7)
+                : selectedDate.getFullYear()
+            }
+            min={dateFilter === 'year' ? 2000 : undefined}
+            max={dateFilter === 'year' ? 2100 : undefined}
+            onChange={e => {
+              if (dateFilter === 'day') {
+                setSelectedDate(new Date(e.target.value + 'T00:00:00'));
+              } else if (dateFilter === 'month') {
+                const [year, month] = e.target.value.split('-').map(Number);
+                setSelectedDate(new Date(year, month - 1, 1));
+              } else {
+                setSelectedDate(new Date(Number(e.target.value), 0, 1));
+              }
+            }}
+            className="bg-dark-tertiary text-gray-200 rounded-lg px-3 py-2 border-none focus:ring-2 focus:ring-gold-primary"
+            style={{ width: dateFilter === 'year' ? 100 : undefined }}
+          />
         </div>
 
         {/* Main Content */}
