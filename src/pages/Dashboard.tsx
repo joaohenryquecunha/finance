@@ -14,7 +14,7 @@ import { RenewalModal } from '../components/RenewalModal';
 import { PaymentSuccessModal } from '../components/PaymentSuccessModal';
 import { defaultCategories } from '../data';
 import { Transaction, Category, Company } from '../types';
-import { LogOut, Wallet, TrendingUp, TrendingDown, Settings, Menu, UserCircle, Pencil, DollarSign, Building2, Landmark, FileDown, X } from 'lucide-react';
+import { LogOut, Wallet, TrendingUp, TrendingDown, Settings, Menu, UserCircle, Pencil, DollarSign, Building2, Landmark, FileDown, X, Play } from 'lucide-react';
 import { startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval, parseISO } from 'date-fns';
 import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -464,6 +464,13 @@ export const Dashboard: React.FC = () => {
                           <span className="text-lg font-semibold text-gray-200">Relatórios</span>
                         </button>
                         <button
+                          onClick={() => window.open('https://uzzi-finance-motion-player-06.vercel.app/', '_blank')}
+                          className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-tertiary w-full"
+                        >
+                          <Play size={32} className="text-gold-primary" />
+                          <span className="text-lg font-semibold text-gray-200">Tutorial e Cursos</span>
+                        </button>
+                        <button
                           onClick={() => { signOut(); setShowMenu(false); }}
                           className="flex flex-col items-center gap-2 p-4 md:p-6 rounded-xl bg-dark-tertiary hover:bg-red-400/10 transition-colors shadow-lg border border-dark-tertiary w-full"
                         >
@@ -584,6 +591,13 @@ export const Dashboard: React.FC = () => {
               >
                 <FileDown size={28} className="text-gold-primary" />
                 <span className="text-base font-semibold text-gray-200">Relatórios</span>
+              </button>
+              <button
+                onClick={() => window.open('https://uzzi-finance-motion-player-06.vercel.app/', '_blank')}
+                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-tertiary"
+              >
+                <Play size={28} className="text-gold-primary" />
+                <span className="text-base font-semibold text-gray-200">Tutorial e Cursos</span>
               </button>
               <button
                 onClick={() => { signOut(); setShowMobileMenu(false); }}
