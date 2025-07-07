@@ -179,7 +179,7 @@ export const Companies: React.FC = () => {
         </div>
 
         {/* Filtros de data */}
-        <div className="flex flex-wrap gap-2 mb-4 items-center">
+        <div className="flex flex-wrap gap-2 mb-4 items-center sm:mt-0 mt-12">
           <label className="text-gray-300 font-medium">Filtrar por:</label>
           <select
             value={dateFilter}
@@ -217,7 +217,7 @@ export const Companies: React.FC = () => {
         </div>
 
         {/* Main Content */}
-        <div className="mt-16 sm:mt-0">
+        <div className="mt-4 sm:mt-0">
           {error ? (
             <div className="bg-red-400/10 text-red-400 p-4 rounded-lg text-center">
               {error}
