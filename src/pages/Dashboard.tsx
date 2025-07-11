@@ -369,6 +369,18 @@ export const Dashboard: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [showMenu]);
 
+  // Bloquear scroll do body quando o menu mobile estiver aberto
+  useEffect(() => {
+    if (showMobileMenu) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [showMobileMenu]);
+
   return (
     <div className="min-h-screen bg-dark-primary">
       {/* Navbar moderna */}
@@ -554,7 +566,7 @@ export const Dashboard: React.FC = () => {
         )}
         {/* Mobile Menu */}
         {showMobileMenu && (
-          <div className="absolute top-full left-0 right-0 bg-dark-secondary border-t border-dark-terciary py-2 px-4 shadow-gold-sm z-40">
+          <div className="absolute top-full left-0 right-0 bg-dark-secondary border-t border-dark-terciary py-2 px-4 shadow-gold-sm z-40" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
             <div className="flex flex-col gap-3">
               <button
                 onClick={() => { navigate('/companies'); setShowMobileMenu(false); }}
