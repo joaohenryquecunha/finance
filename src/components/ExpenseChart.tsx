@@ -20,6 +20,7 @@ interface ExpenseChartProps {
     end: Date;
   };
   onDateFilterChange: (filter: 'day' | 'month' | 'year') => void;
+  onDateValueChange?: (date: Date) => void; // Novo prop opcional
 }
 
 const TIMEZONE = 'America/Sao_Paulo';
@@ -62,7 +63,8 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
   categories,
   dateFilter,
   dateRange,
-  onDateFilterChange
+  onDateFilterChange,
+  onDateValueChange
 }) => {
   const getCategoryColor = (categoryName: string): string => {
     const baseCategoryName = categoryName.split(' (')[0];
@@ -146,6 +148,42 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
     }
   };
 
+  // Utilitário para montar valores de input
+  const getMonthInputValue = () => {
+    const y = dateRange.start.getFullYear();
+    const m = dateRange.start.getMonth() + 1;
+    return `${y}-${String(m).padStart(2, '0')}`;
+  };
+  const getDayInputValue = () => {
+    const y = dateRange.start.getFullYear();
+    const m = dateRange.start.getMonth() + 1;
+    const d = dateRange.start.getDate();
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  };
+
+  // Handlers para inputs
+  const handleYearInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const year = Number(e.target.value);
+    if (!isNaN(year)) {
+      const newDate = new Date(year, 0, 1);
+      if (onDateValueChange) onDateValueChange(newDate);
+    }
+  };
+  const handleMonthInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const [year, month] = e.target.value.split('-').map(Number);
+    if (!isNaN(year) && !isNaN(month)) {
+      const newDate = new Date(year, month - 1, 1);
+      if (onDateValueChange) onDateValueChange(newDate);
+    }
+  };
+  const handleDayInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const [year, month, day] = e.target.value.split('-').map(Number);
+    if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+      const newDate = new Date(year, month - 1, day);
+      if (onDateValueChange) onDateValueChange(newDate);
+    }
+  };
+
   return (
     <div className="bg-dark-secondary p-4 sm:p-6 rounded-xl shadow-gold-sm">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
@@ -160,6 +198,36 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
             <option value="month">Mês</option>
             <option value="year">Ano</option>
           </select>
+          {/* Input de data conforme filtro */}
+          {dateFilter === 'year' && (
+            <input
+              type="number"
+              min="1900"
+              max="2100"
+              value={dateRange.start.getFullYear()}
+              onChange={handleYearInput}
+              className="rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent w-full sm:w-auto"
+              style={{ width: 100 }}
+            />
+          )}
+          {dateFilter === 'month' && (
+            <input
+              type="month"
+              value={getMonthInputValue()}
+              onChange={handleMonthInput}
+              className="rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent w-full sm:w-auto"
+              style={{ width: 140 }}
+            />
+          )}
+          {dateFilter === 'day' && (
+            <input
+              type="date"
+              value={getDayInputValue()}
+              onChange={handleDayInput}
+              className="rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent w-full sm:w-auto"
+              style={{ width: 140 }}
+            />
+          )}
         </div>
       </div>
 

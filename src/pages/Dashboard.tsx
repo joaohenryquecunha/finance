@@ -61,6 +61,10 @@ export const Dashboard: React.FC = () => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  });
   const months = [
     'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
     'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
@@ -197,8 +201,17 @@ export const Dashboard: React.FC = () => {
     return Math.round(((currentAmount - previousAmount) / previousAmount) * 100);
   }, [selectedMonth, getFilteredTransactions]);
 
-  // Calcule dateRange e filteredTransactionsByRange no escopo principal
-  const dateRange = getDateRange(new Date(Number(selectedMonth.split('-')[0]), Number(selectedMonth.split('-')[1]) - 1, 1), dateFilter);
+  // dateRange dinâmico conforme filtro
+  const dateRange = React.useMemo(() => {
+    if (dateFilter === 'day') {
+      const [year, month, day] = selectedDate.split('-').map(Number);
+      return getDateRange(new Date(year, month - 1, day), 'day');
+    } else {
+      const [year, month] = selectedMonth.split('-').map(Number);
+      return getDateRange(new Date(year, month - 1, 1), dateFilter);
+    }
+  }, [dateFilter, selectedMonth, selectedDate]);
+
   const filteredTransactionsByRange = transactions.filter(transaction => {
     const transactionDate = utcToZonedTime(parseISO(transaction.date), TIMEZONE);
     const startDate = utcToZonedTime(dateRange.start, TIMEZONE);
@@ -380,6 +393,17 @@ export const Dashboard: React.FC = () => {
       document.body.style.overflow = '';
     };
   }, [showMobileMenu]);
+
+  // Atualiza selectedMonth/selectedDate conforme filtro
+  const handleDateValueChange = (date: Date) => {
+    if (dateFilter === 'year') {
+      setSelectedMonth(`${date.getFullYear()}-01`);
+    } else if (dateFilter === 'month') {
+      setSelectedMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
+    } else if (dateFilter === 'day') {
+      setSelectedDate(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-dark-primary">
@@ -677,6 +701,7 @@ export const Dashboard: React.FC = () => {
             dateFilter={dateFilter}
             dateRange={dateRange}
             onDateFilterChange={setDateFilter}
+            onDateValueChange={handleDateValueChange}
           />
           <TransactionList 
             transactions={transactions}
