@@ -4,12 +4,10 @@ import {
   PieChart,
   Pie,
   Cell,
-  Tooltip,
-  Legend
+  Tooltip
 } from 'recharts';
-import { format, isWithinInterval, parseISO } from 'date-fns';
+import { isWithinInterval, parseISO } from 'date-fns';
 import { utcToZonedTime } from 'date-fns-tz';
-import { ptBR } from 'date-fns/locale';
 import { Transaction, Category } from '../types';
 import { formatCurrency } from '../utils/format';
 
@@ -17,19 +15,24 @@ interface ExpenseChartProps {
   transactions: Transaction[];
   categories: Category[];
   dateFilter: 'day' | 'month' | 'year';
-  selectedDate: Date;
   dateRange: {
     start: Date;
     end: Date;
   };
   onDateFilterChange: (filter: 'day' | 'month' | 'year') => void;
-  onSelectedDateChange: (date: Date) => void;
 }
 
 const TIMEZONE = 'America/Sao_Paulo';
 
 const RADIAN = Math.PI / 180;
-const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: any) => {
+const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: {
+  cx: number;
+  cy: number;
+  midAngle: number;
+  innerRadius: number;
+  outerRadius: number;
+  percent: number;
+}) => {
   const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
   const x = cx + radius * Math.cos(-midAngle * RADIAN);
   const y = cy + radius * Math.sin(-midAngle * RADIAN);
@@ -58,10 +61,8 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
   transactions, 
   categories,
   dateFilter,
-  selectedDate,
   dateRange,
-  onDateFilterChange,
-  onSelectedDateChange
+  onDateFilterChange
 }) => {
   const getCategoryColor = (categoryName: string): string => {
     const baseCategoryName = categoryName.split(' (')[0];
@@ -137,72 +138,11 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
   const formatDateLabel = () => {
     switch (dateFilter) {
       case 'day':
-        return format(selectedDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR });
+        return dateRange.start.toLocaleDateString('pt-BR');
       case 'month':
-        return format(selectedDate, "MMMM 'de' yyyy", { locale: ptBR });
+        return dateRange.start.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
       case 'year':
-        return format(selectedDate, 'yyyy', { locale: ptBR });
-    }
-  };
-
-  const handleDateChange = (value: string) => {
-    let newDate: Date;
-    
-    switch (dateFilter) {
-      case 'day':
-        const [year, month, day] = value.split('-').map(Number);
-        newDate = new Date(year, month - 1, day, 12, 0, 0);
-        break;
-      
-      case 'month':
-        const [yearMonth, monthMonth] = value.split('-').map(Number);
-        newDate = new Date(yearMonth, monthMonth - 1, 1, 12, 0, 0);
-        break;
-      
-      case 'year':
-        newDate = new Date(parseInt(value), 0, 1, 12, 0, 0);
-        break;
-      
-      default:
-        return;
-    }
-
-    onSelectedDateChange(newDate);
-  };
-
-  const getDateInput = () => {
-    const currentDate = selectedDate;
-    
-    switch (dateFilter) {
-      case 'day':
-        return (
-          <input
-            type="date"
-            value={format(currentDate, 'yyyy-MM-dd')}
-            onChange={(e) => handleDateChange(e.target.value)}
-            className="rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent w-full sm:w-auto"
-          />
-        );
-      case 'month':
-        return (
-          <input
-            type="month"
-            value={format(currentDate, 'yyyy-MM')}
-            onChange={(e) => handleDateChange(e.target.value)}
-            className="rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent w-full sm:w-auto"
-          />
-        );
-      case 'year':
-        return (
-          <input
-            type="number"
-            value={format(currentDate, 'yyyy')}
-            onChange={(e) => handleDateChange(e.target.value)}
-            min="1900"
-            max="2100"
-            className="rounded-lg bg-dark-tertiary border-dark-tertiary text-gray-200 p-2 focus:ring-2 focus:ring-gold-primary focus:border-transparent w-full sm:w-auto"
-          />
-        );
+        return dateRange.start.getFullYear();
     }
   };
 
@@ -220,7 +160,6 @@ export const ExpenseChart: React.FC<ExpenseChartProps> = ({
             <option value="month">Mês</option>
             <option value="year">Ano</option>
           </select>
-          {getDateInput()}
         </div>
       </div>
 

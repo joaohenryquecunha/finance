@@ -36,11 +36,6 @@ export const Dashboard: React.FC = () => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [dateFilter, setDateFilter] = useState<DateFilter>('month');
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    return now;
-  });
   const [editingTransaction, setEditingTransaction] = useState<Transaction | undefined>();
   const [showProfileModal, setShowProfileModal] = useState(
     (!user?.profile || !user?.profile.email) && !user?.isAdmin
@@ -70,6 +65,13 @@ export const Dashboard: React.FC = () => {
     'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
     'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
   ];
+
+  const [cardsData, setCardsData] = useState({
+    balance: 0,
+    income: { amount: 0, trend: 0 },
+    expenses: { amount: 0, trend: 0 },
+    investments: { amount: 0, trend: 0 }
+  });
 
   useEffect(() => {
     if (reportFilter === 'month') {
@@ -164,8 +166,8 @@ export const Dashboard: React.FC = () => {
   };
 
   // Atualizar getFilteredTransactions para aceitar selectedMonth
-  const getFilteredTransactions = (date: Date = selectedDate, monthStr?: string) => {
-    let dateToUse = date;
+  const getFilteredTransactions = useCallback((monthStr?: string) => {
+    let dateToUse = new Date();
     if (monthStr) {
       const [year, month] = monthStr.split('-').map(Number);
       dateToUse = new Date(year, month - 1, 1);
@@ -175,32 +177,28 @@ export const Dashboard: React.FC = () => {
       const transactionDate = utcToZonedTime(parseISO(transaction.date), TIMEZONE);
       const startDate = utcToZonedTime(range.start, TIMEZONE);
       const endDate = utcToZonedTime(range.end, TIMEZONE);
-      
       return isWithinInterval(transactionDate, { 
         start: startDate,
         end: endDate
       });
     });
-  };
+  }, [transactions, dateFilter]);
 
-  const calculateTrend = (currentAmount: number, type: 'income' | 'expense' | 'investment') => {
+  // income, expenses e investments precisam ser recalculados sempre que filteredTransactions mudar
+  // Mover calculateTrend para useCallback para não causar dependência mutável
+  const calculateTrend = useCallback((currentAmount: number, type: 'income' | 'expense' | 'investment') => {
     const [year, month] = selectedMonth.split('-').map(Number);
     const previousMonth = new Date(year, month - 2, 1); // mês anterior
     const previousMonthStr = `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
-    const previousTransactions = getFilteredTransactions(previousMonth, previousMonthStr);
-    
+    const previousTransactions = getFilteredTransactions(previousMonthStr);
     const previousAmount = previousTransactions.reduce((acc, transaction) => 
       transaction.type === type ? acc + transaction.amount : acc, 0);
-
     if (previousAmount === 0) return currentAmount > 0 ? 100 : 0;
-    
     return Math.round(((currentAmount - previousAmount) / previousAmount) * 100);
-  };
+  }, [selectedMonth, getFilteredTransactions]);
 
-  // income, expenses e investments precisam ser recalculados sempre que filteredTransactions mudar
-  const dateRange = getDateRange(selectedDate, dateFilter);
-
-  // Substituir filteredTransactions por filteredTransactionsByRange para os cards principais
+  // Calcule dateRange e filteredTransactionsByRange no escopo principal
+  const dateRange = getDateRange(new Date(Number(selectedMonth.split('-')[0]), Number(selectedMonth.split('-')[1]) - 1, 1), dateFilter);
   const filteredTransactionsByRange = transactions.filter(transaction => {
     const transactionDate = utcToZonedTime(parseISO(transaction.date), TIMEZONE);
     const startDate = utcToZonedTime(dateRange.start, TIMEZONE);
@@ -208,14 +206,15 @@ export const Dashboard: React.FC = () => {
     return isWithinInterval(transactionDate, { start: startDate, end: endDate });
   });
 
-  const [cardsData, setCardsData] = useState({
-    balance: 0,
-    income: { amount: 0, trend: 0 },
-    expenses: { amount: 0, trend: 0 },
-    investments: { amount: 0, trend: 0 }
-  });
-
   useEffect(() => {
+    // Calcule filteredTransactionsByRange dentro do efeito para garantir dependências estáveis
+    const dateRange = getDateRange(new Date(Number(selectedMonth.split('-')[0]), Number(selectedMonth.split('-')[1]) - 1, 1), dateFilter);
+    const filteredTransactionsByRange = transactions.filter(transaction => {
+      const transactionDate = utcToZonedTime(parseISO(transaction.date), TIMEZONE);
+      const startDate = utcToZonedTime(dateRange.start, TIMEZONE);
+      const endDate = utcToZonedTime(dateRange.end, TIMEZONE);
+      return isWithinInterval(transactionDate, { start: startDate, end: endDate });
+    });
     setCardsData({
       balance: filteredTransactionsByRange.reduce((acc, transaction)  => {
         return transaction.type === 'income'
@@ -256,7 +255,7 @@ export const Dashboard: React.FC = () => {
         };
       })()
     });
-  }, [filteredTransactionsByRange, calculateTrend]);
+  }, [transactions, selectedMonth, dateFilter, calculateTrend]);
 
   const handleAddTransaction = async (newTransaction: Omit<Transaction, 'id'>) => {
     const transaction: Transaction = {
@@ -339,9 +338,15 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleProfileSubmit = async (data: { cpf: string; phone: string; email: string }) => {
+  const handleProfileSubmit = async (data: { cpf?: string; phone?: string; email?: string }) => {
     try {
-      await updateUserProfile(data);
+      // Preenche campos obrigatórios com string vazia se não vierem
+      const profile = {
+        cpf: data.cpf ?? '',
+        phone: data.phone ?? '',
+        email: data.email ?? ''
+      };
+      await updateUserProfile(profile);
       setShowProfileModal(false);
     } catch (error) {
       console.error(error);
@@ -352,12 +357,6 @@ export const Dashboard: React.FC = () => {
     if (!user?.accessDuration || !user?.createdAt) return 0;
     return getDiasRestantes(user.accessDuration, user.createdAt);
   };
-
-  // Atualizar selectedDate ao mudar selectedMonth
-  useEffect(() => {
-    const [year, month] = selectedMonth.split('-').map(Number);
-    setSelectedDate(new Date(year, month - 1, 1));
-  }, [selectedMonth]);
 
   // Fecha o menu ao clicar fora
   useEffect(() => {
@@ -411,7 +410,7 @@ export const Dashboard: React.FC = () => {
             <div className="relative">
               <button
                 onClick={() => setShowMenu((v) => !v)}
-                className="flex items-center gap-2 px-4 py-2 bg-dark-tertiary text-gray-300 rounded-lg hover:text-gold-primary hover:bg-dark-primary transition-colors border border-dark-tertiary shadow-sm lg:px-3 lg:py-2"
+                className="flex items-center gap-2 px-4 py-2 bg-dark-tertiary text-gray-300 rounded-lg hover:text-gold-primary hover:bg-dark-primary transition-colors border border-dark-terciary shadow-sm lg:px-3 lg:py-2"
                 aria-label="Abrir menu"
               >
                 <Menu size={26} />
@@ -535,7 +534,7 @@ export const Dashboard: React.FC = () => {
         </div>
         {/* Drop do relógio no mobile */}
         {showMobileAccessDrop && (
-          <div className="absolute right-4 top-16 z-50 bg-dark-secondary rounded-xl shadow-lg p-4 border border-dark-tertiary animate-fade-in">
+          <div className="absolute right-4 top-16 z-50 bg-dark-secondary rounded-xl shadow-lg p-4 border border-dark-terciary animate-fade-in">
             {user?.accessDuration && user?.createdAt && (
               <AccessCountdown
                 accessDuration={user.accessDuration}
@@ -555,53 +554,53 @@ export const Dashboard: React.FC = () => {
         )}
         {/* Mobile Menu */}
         {showMobileMenu && (
-          <div className="absolute top-full left-0 right-0 bg-dark-secondary border-t border-dark-tertiary py-2 px-4 shadow-gold-sm z-40">
+          <div className="absolute top-full left-0 right-0 bg-dark-secondary border-t border-dark-terciary py-2 px-4 shadow-gold-sm z-40">
             <div className="flex flex-col gap-3">
               <button
                 onClick={() => { navigate('/companies'); setShowMobileMenu(false); }}
-                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-tertiary"
+                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-terciary"
               >
                 <Building2 size={28} className="text-gold-primary" />
                 <span className="text-base font-semibold text-gray-200">Empresas</span>
               </button>
               <button
                 onClick={() => { navigate('/goals'); setShowMobileMenu(false); }}
-                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-tertiary"
+                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-terciary"
               >
                 <DollarSign size={28} className="text-gold-primary" />
                 <span className="text-base font-semibold text-gray-200">Metas</span>
               </button>
               <button
                 onClick={() => { setShowProfileEditor(true); setShowMobileMenu(false); }}
-                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-tertiary"
+                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-terciary"
               >
                 <UserCircle size={28} className="text-gold-primary" />
                 <span className="text-base font-semibold text-gray-200">Editar Perfil</span>
               </button>
               <button
                 onClick={() => { setShowCategoryManager(true); setShowMobileMenu(false); }}
-                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-tertiary"
+                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-terciary"
               >
                 <Settings size={28} className="text-gold-primary" />
                 <span className="text-base font-semibold text-gray-200">Gerenciar Categorias</span>
               </button>
               <button
                 onClick={() => setShowReportModal(true)}
-                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-tertiary"
+                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-terciary"
               >
                 <FileDown size={28} className="text-gold-primary" />
                 <span className="text-base font-semibold text-gray-200">Relatórios</span>
               </button>
               <button
                 onClick={() => window.open('https://uzzi-finance-motion-player-06.vercel.app/', '_blank')}
-                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-tertiary"
+                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-gold-primary/10 transition-colors shadow-lg border border-dark-terciary"
               >
                 <Play size={28} className="text-gold-primary" />
                 <span className="text-base font-semibold text-gray-200">Tutorial e Cursos</span>
               </button>
               <button
                 onClick={() => { signOut(); setShowMobileMenu(false); }}
-                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-red-400/10 transition-colors shadow-lg border border-dark-tertiary"
+                className="w-full flex flex-col items-center gap-2 py-4 rounded-xl bg-dark-tertiary hover:bg-red-400/10 transition-colors shadow-lg border border-dark-terciary"
               >
                 <LogOut size={28} className="text-red-400" />
                 <span className="text-base font-semibold text-red-400">Sair</span>
@@ -664,10 +663,8 @@ export const Dashboard: React.FC = () => {
             transactions={transactions}
             categories={categories}
             dateFilter={dateFilter}
-            selectedDate={selectedDate}
             dateRange={dateRange}
             onDateFilterChange={setDateFilter}
-            onSelectedDateChange={setSelectedDate}
           />
           <TransactionList 
             transactions={transactions}
@@ -747,7 +744,7 @@ export const Dashboard: React.FC = () => {
                     Mensal
                   </button>
                   <button
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold border-2 transition-all ${reportFilter === 'year' ? 'bg-gold-primary text-dark-primary border-gold-primary shadow' : 'bg-dark-tertiary text-gray-200 border-dark-tertiary hover:border-gold-primary'}`}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold border-2 transition-all ${reportFilter === 'year' ? 'bg-gold-primary text-dark-primary border-gold-primary shadow' : 'bg-dark-tertiary text-gray-200 border-dark-terciary hover:border-gold-primary'}`}
                     onClick={() => {
                       setReportFilter('year');
                       setSelectedReportYear(String(currentYear));
@@ -767,7 +764,7 @@ export const Dashboard: React.FC = () => {
                       {months.map((m, idx) => (
                         <button
                           key={m}
-                          className={`rounded-lg py-2 font-semibold transition-all border-2 ${selectedReportMonth && selectedReportMonth.endsWith(`-${String(idx+1).padStart(2,'0')}`) ? 'bg-gold-primary text-dark-primary border-gold-primary' : 'bg-dark-tertiary text-gray-200 border-dark-tertiary hover:border-gold-primary'}`}
+                          className={`rounded-lg py-2 font-semibold transition-all border-2 ${selectedReportMonth && selectedReportMonth.endsWith(`-${String(idx+1).padStart(2,'0')}`) ? 'bg-gold-primary text-dark-primary border-gold-primary' : 'bg-dark-terciary text-gray-200 border-dark-terciary hover:border-gold-primary'}`}
                           onClick={() => {
                             if (selectedReportMonth) {
                               const [y] = selectedReportMonth.split('-');
@@ -791,7 +788,7 @@ export const Dashboard: React.FC = () => {
                       {Array.from({length: 4}, (_,i) => yearGridStart + i).map(y => (
                         <button
                           key={y}
-                          className={`rounded-lg py-2 font-semibold transition-all border-2 ${selectedReportMonth && selectedReportMonth.startsWith(`${y}-`) ? 'bg-gold-primary text-dark-primary border-gold-primary' : 'bg-dark-tertiary text-gray-200 border-dark-tertiary hover:border-gold-primary'}`}
+                          className={`rounded-lg py-2 font-semibold transition-all border-2 ${selectedReportMonth && selectedReportMonth.startsWith(`${y}-`) ? 'bg-gold-primary text-dark-primary border-gold-primary' : 'bg-dark-terciary text-gray-200 border-dark-terciary hover:border-gold-primary'}`}
                           onClick={() => {
                             if (selectedReportMonth) {
                               const [,m] = selectedReportMonth.split('-');
@@ -821,7 +818,7 @@ export const Dashboard: React.FC = () => {
                     {Array.from({length: 4}, (_,i) => yearGridStart + i).map(y => (
                       <button
                         key={y}
-                        className={`rounded-lg py-2 font-semibold transition-all border-2 ${selectedReportYear === String(y) ? 'bg-gold-primary text-dark-primary border-gold-primary' : 'bg-dark-tertiary text-gray-200 border-dark-tertiary hover:border-gold-primary'}`}
+                        className={`rounded-lg py-2 font-semibold transition-all border-2 ${selectedReportYear === String(y) ? 'bg-gold-primary text-dark-primary border-gold-primary' : 'bg-dark-terciary text-gray-200 border-dark-terciary hover:border-gold-primary'}`}
                         onClick={() => setSelectedReportYear(String(y))}
                       >
                         {y}

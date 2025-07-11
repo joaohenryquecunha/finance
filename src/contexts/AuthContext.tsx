@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { 
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -190,10 +190,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
     return () => unsubscribe();
-  }, [user?.isAdmin, navigate]); // Corrigido: depende apenas de isAdmin/navigate
+  }, [navigate]); // Removido 'user' das dependências para evitar loop
 
   // --- Funções signOut e checkAccessExpiration ---
-  const checkAccessExpiration = () => {
+  const checkAccessExpiration = useCallback(() => {
     if (!user || user.isAdmin) return false;
     if (user.isApproved) return false;
     if (!user.accessDuration || !user.createdAt) return true;
@@ -201,9 +201,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const now = new Date().getTime();
     const elapsedSeconds = Math.floor((now - startTime) / 1000);
     return elapsedSeconds >= user.accessDuration;
-  };
+  }, [user]);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     try {
       if (!user?.isAdmin) {
         await firebaseSignOut(auth);
@@ -217,7 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Error signing out:', error);
       throw error;
     }
-  };
+  }, [user, navigate]);
 
   // --- useEffect que depende de signOut e checkAccessExpiration ---
   useEffect(() => {
@@ -298,7 +298,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => unsubscribe();
-  }, [user, navigate]);
+  }, [navigate]);
 
   // Corrigir dependências e evitar fetch redundante
   useEffect(() => {
