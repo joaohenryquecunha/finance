@@ -37,9 +37,12 @@ export const Dashboard: React.FC = () => {
   const [showMenu, setShowMenu] = useState(false);
   const [dateFilter, setDateFilter] = useState<DateFilter>('month');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | undefined>();
-  const [showProfileModal, setShowProfileModal] = useState(
-    (!user?.profile || !user?.profile.email) && !user?.isAdmin
-  );
+  const [showProfileModal, setShowProfileModal] = useState(() => {
+    if (!user || user.isAdmin) return false;
+    const profile = user.profile || {};
+    // Considera faltando se qualquer campo obrigatório estiver ausente ou vazio
+    return (!profile.cpf || !profile.phone || !profile.email);
+  });
   const [showRenewalModal, setShowRenewalModal] = useState(false);
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
   const [searchParams] = useSearchParams();
@@ -132,8 +135,16 @@ export const Dashboard: React.FC = () => {
   }, [user?.uid, fetchCompanies]); // Corrigido: depende apenas de user?.uid
 
   useEffect(() => {
-    if (user && !user.isAdmin && (!user.profile || !user.profile.email)) {
+    if (!user || user.isAdmin) {
+      setShowProfileModal(false);
+      return;
+    }
+    const profile = user.profile || {};
+    // Se faltar qualquer campo obrigatório, mostra o modal
+    if (!profile.cpf || !profile.phone || !profile.email) {
       setShowProfileModal(true);
+    } else {
+      setShowProfileModal(false);
     }
   }, [user]);
 
@@ -353,14 +364,21 @@ export const Dashboard: React.FC = () => {
 
   const handleProfileSubmit = async (data: { cpf?: string; phone?: string; email?: string }) => {
     try {
-      // Preenche campos obrigatórios com string vazia se não vierem
+      // Atualiza apenas os campos enviados, mantendo os já existentes
       const profile = {
-        cpf: data.cpf ?? '',
-        phone: data.phone ?? '',
-        email: data.email ?? ''
+        cpf: data.cpf ?? user?.profile?.cpf ?? '',
+        phone: data.phone ?? user?.profile?.phone ?? '',
+        email: data.email ?? user?.profile?.email ?? ''
       };
       await updateUserProfile(profile);
-      setShowProfileModal(false);
+      // Força atualização dos dados do usuário após update
+      await getUserData();
+      // Checa novamente se falta algum campo obrigatório
+      if (!profile.cpf || !profile.phone || !profile.email) {
+        setShowProfileModal(true);
+      } else {
+        setShowProfileModal(false);
+      }
     } catch (error) {
       console.error(error);
     }
