@@ -231,8 +231,15 @@ export const Dashboard: React.FC = () => {
   });
 
   useEffect(() => {
-    // Calcule filteredTransactionsByRange dentro do efeito para garantir dependências estáveis
-    const dateRange = getDateRange(new Date(Number(selectedMonth.split('-')[0]), Number(selectedMonth.split('-')[1]) - 1, 1), dateFilter);
+    // Calcula o intervalo conforme o filtro selecionado
+    let dateRange;
+    if (dateFilter === 'day') {
+      const [year, month, day] = selectedDate.split('-').map(Number);
+      dateRange = getDateRange(new Date(year, month - 1, day), 'day');
+    } else {
+      const [year, month] = selectedMonth.split('-').map(Number);
+      dateRange = getDateRange(new Date(year, month - 1, 1), dateFilter);
+    }
     const filteredTransactionsByRange = transactions.filter(transaction => {
       const transactionDate = utcToZonedTime(parseISO(transaction.date), TIMEZONE);
       const startDate = utcToZonedTime(dateRange.start, TIMEZONE);
@@ -279,7 +286,7 @@ export const Dashboard: React.FC = () => {
         };
       })()
     });
-  }, [transactions, selectedMonth, dateFilter, calculateTrend]);
+  }, [transactions, selectedMonth, selectedDate, dateFilter, calculateTrend]);
 
   const handleAddTransaction = async (newTransaction: Omit<Transaction, 'id'>) => {
     const transaction: Transaction = {
